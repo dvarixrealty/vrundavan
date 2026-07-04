@@ -1,0 +1,277 @@
+{
+  "entities": {
+    "Property": {
+      "title": "Property",
+      "description": "Premium commercial or family residential holding in Bangalore",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string" },
+        "image": { "type": "string" },
+        "images": { "type": "array" },
+        "rating": { "type": "number" },
+        "reviews": { "type": "number" },
+        "address": { "type": "string" },
+        "location": { "type": "string" },
+        "description": { "type": "string" },
+        "sqft": { "type": "number" },
+        "beds": { "type": "number" },
+        "baths": { "type": "number" },
+        "price": { "type": "number" },
+        "featured": { "type": "boolean" },
+        "amenities": { "type": "array" }
+      },
+      "required": ["id", "title", "type", "address", "location", "price"]
+    },
+    "Inquiry": {
+      "title": "Inquiry",
+      "description": "User lead submitted for a specific listing portfolio holding",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "propertyName": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "message": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["New", "In Progress", "Contacted", "Archived"] },
+        "preferredTime": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "phone", "message", "date"]
+    },
+    "CustomRequirement": {
+      "title": "CustomRequirement",
+      "description": "Detailed custom property requirements submitted by a buyer or tenant",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "mobileNumber": { "type": "string" },
+        "emailAddress": { "type": "string" },
+        "city": { "type": "string" },
+        "lookingFor": { "type": "string", "enum": ["Buy", "Rent", "Lease", "Invest"] },
+        "propertyType": { "type": "string" },
+        "preferredCity": { "type": "string" },
+        "preferredArea": { "type": "string" },
+        "landmark": { "type": "string" },
+        "minBudget": { "type": "string" },
+        "maxBudget": { "type": "string" },
+        "plotSize": { "type": "string" },
+        "bhkRequirement": { "type": "string" },
+        "readyToMove": { "type": "string", "enum": ["Yes", "No"] },
+        "loanRequired": { "type": "string", "enum": ["Yes", "No"] },
+        "amenities": { "type": "array" },
+        "timeline": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["New", "In Progress", "Contacted", "Archived"] },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "fullName", "mobileNumber", "lookingFor", "propertyType", "preferredCity", "preferredArea"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Property design classification and details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "iconName": { "type": "string" }
+      },
+      "required": ["id", "title", "description"]
+    },
+    "Agent": {
+      "title": "Agent",
+      "description": "Dvarix Realty portfolio specialist coordinates",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "avatar": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" }
+      },
+      "required": ["id", "name", "role", "phone", "email"]
+    },
+    "MapLocation": {
+      "title": "MapLocation",
+      "description": "Dynamic regional coordinate details on Bangalore territory matrix",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "x": { "type": "string" },
+        "y": { "type": "string" },
+        "listings": { "type": "number" },
+        "avgValuation": { "type": "string" },
+        "benefits": { "type": "string" },
+        "description": { "type": "string" },
+        "growth": { "type": "string" },
+        "path": { "type": "string" }
+      },
+      "required": ["name", "x", "y", "listings"]
+    },
+    "AiPermission": {
+      "title": "AiPermission",
+      "description": "Permissions matrix for a role in the AI Center",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "role_id": { "type": "string" },
+        "can_upload_documents": { "type": "boolean" },
+        "can_create_articles": { "type": "boolean" },
+        "can_edit_articles": { "type": "boolean" },
+        "can_delete_documents": { "type": "boolean" },
+        "can_manage_faqs": { "type": "boolean" },
+        "can_reindex_ai": { "type": "boolean" },
+        "can_manage_prompts": { "type": "boolean" },
+        "can_manage_workflows": { "type": "boolean" },
+        "can_view_analytics": { "type": "boolean" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["id", "role_id"]
+    },
+    "AiActivityLog": {
+      "title": "AiActivityLog",
+      "description": "Historical audit logs for AI operations and data indexing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "action": { "type": "string" },
+        "resource_type": { "type": "string" },
+        "resource_name": { "type": "string" },
+        "description": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "user_id", "action"]
+    },
+    "ChatbotKnowledge": {
+      "title": "ChatbotKnowledge",
+      "description": "Knowledge and FAQ content for customer website chatbot",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "keywords": { "type": "string" },
+        "priority": { "type": "string", "enum": ["Low", "Medium", "High"] },
+        "status": { "type": "string", "enum": ["Active", "Draft", "Disabled"] },
+        "category": { "type": "string" },
+        "version": { "type": "number" },
+        "lastUpdated": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "title", "content", "category"]
+    },
+    "QualificationRule": {
+      "title": "QualificationRule",
+      "description": "Dynamic qualification rules for customer routing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ruleName": { "type": "string" },
+        "conditionField": { "type": "string" },
+        "conditionOperator": { "type": "string" },
+        "conditionValue": { "type": "string" },
+        "actionType": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Disabled"] },
+        "lastUpdated": { "type": "string" }
+      },
+      "required": ["id", "ruleName", "conditionField", "conditionOperator", "conditionValue", "actionType"]
+    },
+    "ChatbotAuditLog": {
+      "title": "ChatbotAuditLog",
+      "description": "Operator audit log registry for Dvarix Bot Studio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "user_name": { "type": "string" },
+        "role": { "type": "string" },
+        "actionType": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "moduleAffected": { "type": "string" },
+        "previousValues": { "type": "string" },
+        "updatedValues": { "type": "string" }
+      },
+      "required": ["id", "user_id", "actionType", "timestamp"]
+    },
+    "ChatbotSetting": {
+      "title": "ChatbotSetting",
+      "description": "Global custom configurations for Bot personality, style and integration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "botName": { "type": "string" },
+        "botMission": { "type": "string" },
+        "style": { "type": "string" },
+        "introMessage": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "widgetPosition": { "type": "string" },
+        "primaryColor": { "type": "string" },
+        "welcomeMessage": { "type": "string" },
+        "onlineStatus": { "type": "string" },
+        "offlineMessage": { "type": "string" },
+        "showBranding": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "flows": { "type": "string" }
+      },
+      "required": ["id", "botName"]
+    }
+  },
+  "firestore": {
+    "/properties": {
+      "schema": "Property",
+      "description": "Dynamic listings repository"
+    },
+    "/inquiries": {
+      "schema": "Inquiry",
+      "description": "Direct buyer contact form leads"
+    },
+    "/requirements": {
+      "schema": "CustomRequirement",
+      "description": "Structured real estate checklists of prospective clients"
+    },
+    "/categories": {
+      "schema": "Category",
+      "description": "Configurable search categories"
+    },
+    "/agents": {
+      "schema": "Agent",
+      "description": "Dvarix Realty personnel"
+    },
+    "/map_locations": {
+      "schema": "MapLocation",
+      "description": "Visual coordinates list"
+    },
+    "/ai_permissions": {
+      "schema": "AiPermission",
+      "description": "Permissions settings mapped to specific system roles"
+    },
+    "/ai_activity_logs": {
+      "schema": "AiActivityLog",
+      "description": "Audit trails for knowledge actions"
+    },
+    "/chatbot_knowledge": {
+      "schema": "ChatbotKnowledge",
+      "description": "Knowledge base of website chatbot"
+    },
+    "/qualification_rules": {
+      "schema": "QualificationRule",
+      "description": "Lead and inquiry grading rules"
+    },
+    "/chatbot_audit_logs": {
+      "schema": "ChatbotAuditLog",
+      "description": "Administrative changes tracking"
+    },
+    "/chatbot_settings": {
+      "schema": "ChatbotSetting",
+      "description": "Chatbot personality and widget custom parameters"
+    }
+  }
+}

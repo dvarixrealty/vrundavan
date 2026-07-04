@@ -1,0 +1,6 @@
+{
+  "name": "Dvarix Realty Showcase",
+  "description": "A luxury real estate portfolio and showcase for Dvarix Realty projects, including residential towers, custom villas, commercial complexes, client inquiries, and the robust Dvarix Bot Studio customer-facing AI advisor system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

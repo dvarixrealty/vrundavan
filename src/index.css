@@ -1,0 +1,169 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;600;800&family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Space Grotesk", sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+/* Custom animation classes and utility modifiers */
+@keyframes pulse-slow {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.6; }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 24s linear infinite;
+}
+
+/* Base body styles */
+body {
+  font-family: var(--font-sans);
+  background-color: #0a192f;
+  color: #f8fafc;
+  overflow-x: hidden;
+}
+
+/* Accessibility & High Contrast Enhancements for the Admin Workspace */
+#enterprise-crm-workspace {
+  background-color: #f9fafb !important;
+  color: #111827 !important;
+}
+
+/* Sidebar and general text visibility overrides */
+#enterprise-crm-workspace aside {
+  background-color: #ffffff !important;
+  border-right: 1px solid #d1d5db !important;
+}
+
+#enterprise-crm-workspace aside nav button {
+  color: #374151 !important; /* SECONDARY TEXT */
+  opacity: 1 !important;
+}
+
+#enterprise-crm-workspace aside nav button:hover {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+#enterprise-crm-workspace aside nav button.bg-blue-50\/50,
+#enterprise-crm-workspace aside nav button.text-blue-600 {
+  background-color: #eff6ff !important;
+  color: #1d4ed8 !important; /* Stronger blue */
+  border-color: #bfdbfe !important;
+  font-weight: 700 !important;
+}
+
+#enterprise-crm-workspace aside nav button.bg-blue-50\/50 span,
+#enterprise-crm-workspace aside nav button.text-blue-600 span {
+  color: #1d4ed8 !important;
+  font-weight: 700 !important;
+}
+
+/* Titles and Headers */
+#enterprise-crm-workspace h1,
+#enterprise-crm-workspace h2,
+#enterprise-crm-workspace .text-slate-900,
+#enterprise-crm-workspace .text-slate-800 {
+  color: #111827 !important; /* PRIMARY TEXT */
+  font-weight: 700 !important;
+}
+
+/* Card titles always bold and primary */
+#enterprise-crm-workspace .card-title,
+#enterprise-crm-workspace h3,
+#enterprise-crm-workspace h4 {
+  color: #111827 !important;
+  font-weight: 600 !important;
+}
+
+/* Section descriptions and secondary text */
+#enterprise-crm-workspace p,
+#enterprise-crm-workspace .text-slate-500,
+#enterprise-crm-workspace .text-slate-600,
+#enterprise-crm-workspace .text-slate-450 {
+  color: #374151 !important; /* SECONDARY TEXT */
+}
+
+/* Small muted subtext or secondary info labels */
+#enterprise-crm-workspace .text-slate-400,
+#enterprise-crm-workspace .text-slate-350,
+#enterprise-crm-workspace span.text-slate-400 {
+  color: #4b5563 !important; /* Highly visible slate color */
+}
+
+/* Force form labels to always be very clear */
+#enterprise-crm-workspace label,
+#enterprise-crm-workspace .font-extrabold.text-slate-450 {
+  color: #4b5563 !important; /* LABELS */
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  font-size: 0.7rem !important;
+  letter-spacing: 0.05em !important;
+  opacity: 1 !important;
+}
+
+/* Placeholder and inputs */
+#enterprise-crm-workspace input::placeholder, 
+#enterprise-crm-workspace textarea::placeholder {
+  color: #6b7280 !important; /* PLACEHOLDER TEXT */
+  opacity: 1 !important;
+}
+
+#enterprise-crm-workspace input,
+#enterprise-crm-workspace textarea,
+#enterprise-crm-workspace select {
+  border: 1px solid #d1d5db !important; /* BORDER COLOR */
+  color: #111827 !important; /* PRIMARY TEXT */
+  background-color: #ffffff !important;
+  font-weight: 500 !important;
+}
+
+#enterprise-crm-workspace input:focus,
+#enterprise-crm-workspace textarea:focus,
+#enterprise-crm-workspace select:focus {
+  border-color: #2563eb !important; /* Focal blue */
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
+}
+
+/* Borders */
+#enterprise-crm-workspace .border-slate-100,
+#enterprise-crm-workspace .border-slate-200,
+#enterprise-crm-workspace .border-slate-250,
+#enterprise-crm-workspace .divide-slate-100 {
+  border-color: #d1d5db !important; /* BORDER COLOR */
+}
+
+/* Tables Headers */
+#enterprise-crm-workspace th,
+#enterprise-crm-workspace .table-header {
+  color: #1f2937 !important; /* TABLE HEADER text */
+  background-color: #f3f4f6 !important;
+  font-weight: 600 !important;
+  border-bottom: 2px solid #d1d5db !important;
+}
+
+/* Ensure no text requires hover */
+#enterprise-crm-workspace .group-hover\:opacity-100 {
+  opacity: 1 !important;
+}
+
+/* Conceals standard scrollbars across categories */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
