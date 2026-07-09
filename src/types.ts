@@ -363,6 +363,9 @@ export interface CampaignService {
   submissions: number;
   createdAt: string;
   updatedAt: string;
+  featured?: boolean;
+  showOnHomepage?: boolean;
+  campaignType?: string;
 }
 
 export interface FreeServiceRequest {

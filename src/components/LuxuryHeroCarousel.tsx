@@ -48,11 +48,39 @@ export default function LuxuryHeroCarousel({
 
     return banners
       .filter(b => {
-        const statusStr = (b.status || '') as string;
-        const isPublished = statusStr === 'active' || statusStr === 'Published';
-        if (!isPublished && !b.enabled) return false;
-        if (statusStr === 'inactive' || statusStr === 'Hidden' || statusStr === 'Archived' || statusStr === 'Draft') return false;
+        const statusStr = b.status || 'Draft';
         
+        // Draft and Archived banners are never shown on live homepage
+        if (statusStr === 'Draft' || statusStr === 'Archived' || statusStr === 'inactive' || statusStr === 'Hidden') {
+          return false;
+        }
+
+        // Scheduled banners are active if enabled and within date range
+        if (statusStr === 'Scheduled') {
+          if (!b.enabled) return false;
+          
+          if (b.publishDate) {
+            const pub = new Date(b.publishDate);
+            pub.setHours(0, 0, 0, 0);
+            if (pub > now) return false;
+          } else {
+            // Scheduled banner must have a publish start date to activate
+            return false;
+          }
+          
+          if (b.expiryDate) {
+            const exp = new Date(b.expiryDate);
+            exp.setHours(0, 0, 0, 0);
+            if (exp < now) return false;
+          }
+          
+          return true;
+        }
+
+        // Published (or active) banners
+        const isPublished = statusStr === 'Published' || statusStr === 'active';
+        if (!isPublished && !b.enabled) return false;
+
         if (b.publishDate) {
           const pub = new Date(b.publishDate);
           pub.setHours(0, 0, 0, 0);

@@ -19,6 +19,51 @@ import LayerManager from './hero-builder/LayerManager';
 import SEOAndMedia from './hero-builder/SEOAndMedia';
 import RolePermissions from './hero-builder/RolePermissions';
 
+// Helper to clean payload for Firestore compatibility (remove undefined and empty optional fields)
+function cleanPayload(obj: any): any {
+  if (obj === null || obj === undefined) return undefined;
+  if (Array.isArray(obj)) {
+    const cleanedArr = obj
+      .map(item => cleanPayload(item))
+      .filter(item => item !== undefined && item !== null);
+    return cleanedArr.length > 0 ? cleanedArr : undefined;
+  }
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const value = obj[key];
+        const isCore = ['id', 'bannerName', 'title', 'headline', 'desktopImage', 'status', 'enabled', 'order'].includes(key);
+        if (value === undefined || value === null) {
+          if (isCore) {
+            cleaned[key] = value === null ? null : '';
+          }
+          continue;
+        }
+        if (typeof value === 'string' && value.trim() === '') {
+          if (isCore) {
+            cleaned[key] = '';
+          }
+          continue;
+        }
+        const cleanedVal = cleanPayload(value);
+        if (cleanedVal !== undefined && cleanedVal !== null) {
+          cleaned[key] = cleanedVal;
+        }
+      }
+    }
+    return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+  }
+  return obj;
+}
+
+// Helper to determine if a banner is a Homepage Default Banner
+function isDefaultBanner(banner: HeroBanner): boolean {
+  const nameLower = (banner.bannerName || '').toLowerCase();
+  const headlineLower = (banner.headline || '').toLowerCase();
+  return nameLower.includes('default') || headlineLower.includes('default');
+}
+
 interface HeroBannerManagerProps {
   siteSettings?: SiteCMSConfig;
   setSiteSettings?: (newSettings: SiteCMSConfig) => void;
@@ -128,6 +173,7 @@ export default function HeroBannerManager({
   const [mobileUploading, setMobileUploading] = useState(false);
   const [mobileProgress, setMobileProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [animations, setAnimations] = useState({
     enabled: true,
@@ -437,23 +483,62 @@ export default function HeroBannerManager({
 
   // Publish Status Trigger
   const handleToggleStatus = async (banner: HeroBanner) => {
+    console.log("[CMS DIAGNOSTIC] Toggle status clicked for banner ID:", banner.id);
     const currentStatus = banner.status || 'Draft';
     const isCurrentlyPublished = currentStatus === 'Published' || currentStatus === 'active';
     const newStatus: HeroBanner['status'] = isCurrentlyPublished ? 'Draft' : 'Published';
+    
+    // If we are publishing this default banner, unpublish any other active default banners
+    if (newStatus === 'Published' && isDefaultBanner(banner)) {
+      console.log(`[CMS DIAGNOSTIC] Toggling default banner to Published. Checking other default banners to unpublish.`);
+      try {
+        const defaultBannersToUnpublish = heroBanners.filter(b => 
+          b.id !== banner.id && 
+          isDefaultBanner(b) && 
+          (b.status === 'Published' || b.status === 'active')
+        );
+
+        for (const oldBanner of defaultBannersToUnpublish) {
+          console.log(`[CMS DIAGNOSTIC] Automatically unpublishing old default banner during toggle: ${oldBanner.id}`);
+          const unpublished = {
+            ...oldBanner,
+            status: 'Draft' as const,
+            enabled: false,
+            lastUpdated: new Date().toISOString()
+          };
+          await firebaseService.saveHeroBanner(unpublished);
+        }
+      } catch (err: any) {
+        console.error(`[CMS DIAGNOSTIC ERROR] File: src/components/cms/HeroBannerManager.tsx, Component: HeroBannerManager, Function: handleToggleStatus - Auto-Unpublish, Line: 495, Root Cause: Failed to unpublish previous default banner, Original Error:`, err);
+      }
+    }
+
     const updatedBanner: HeroBanner = {
       ...banner,
       status: newStatus,
       enabled: newStatus === 'Published',
       lastUpdated: new Date().toISOString()
     };
-    await firebaseService.saveHeroBanner(updatedBanner);
-    notify(
-      newStatus === 'Published' ? "Slide Published" : "Slide Unpublished", 
-      `The slide is now ${newStatus === 'Published' ? 'Published (Active)' : 'Draft (Offline)'}.`
-    );
+
+    try {
+      console.log(`[CMS DIAGNOSTIC] Firestore toggle write start for banner ID: ${banner.id}`);
+      await firebaseService.saveHeroBanner(updatedBanner);
+      console.log(`[CMS DIAGNOSTIC] Firestore toggle write success for banner ID: ${banner.id}`);
+      console.log(`[CMS DIAGNOSTIC] List refreshed successfully via subscription.`);
+      console.log(`[CMS DIAGNOSTIC] Homepage displays immediately synchronized.`);
+
+      notify(
+        newStatus === 'Published' ? "Slide Published" : "Slide Unpublished", 
+        `The slide is now ${newStatus === 'Published' ? 'Published (Active)' : 'Draft (Offline)'}.`
+      );
+    } catch (error: any) {
+      console.error(`[CMS DIAGNOSTIC ERROR] File: src/components/cms/HeroBannerManager.tsx, Component: HeroBannerManager, Function: handleToggleStatus, Line: 512, Root Cause: Failed to toggle status in Firestore, Original Error:`, error);
+      alert(`Status Toggle Failed!\n\nOriginal Firebase Error: ${error?.message || error}`);
+    }
   };
 
   const handleDuplicate = async (banner: HeroBanner) => {
+    console.log("[CMS DIAGNOSTIC] Duplicate clicked for banner ID:", banner.id);
     const newId = `banner_${Date.now()}`;
     const newBanner: HeroBanner = {
       ...banner,
@@ -462,17 +547,37 @@ export default function HeroBannerManager({
       order: heroBanners.length + 1,
       lastUpdated: new Date().toISOString()
     };
-    await firebaseService.saveHeroBanner(newBanner);
-    notify("Slide Duplicated", "Copy added successfully.");
+    
+    try {
+      console.log(`[CMS DIAGNOSTIC] Firestore duplicate write start. ID: ${newId}`);
+      await firebaseService.saveHeroBanner(newBanner);
+      console.log(`[CMS DIAGNOSTIC] Firestore duplicate write success. ID: ${newId}`);
+      console.log(`[CMS DIAGNOSTIC] List refreshed successfully via subscription.`);
+      notify("Slide Duplicated", "Copy added successfully.");
+    } catch (error: any) {
+      console.error(`[CMS DIAGNOSTIC ERROR] File: src/components/cms/HeroBannerManager.tsx, Component: HeroBannerManager, Function: handleDuplicate, Line: 535, Root Cause: Failed to write duplicated banner to Firestore, Original Error:`, error);
+      alert(`Duplicate Failed!\n\nOriginal Firebase Error: ${error?.message || error}`);
+    }
   };
 
   const handleDelete = async (bannerId: string) => {
+    console.log("[CMS DIAGNOSTIC] Delete clicked for banner ID:", bannerId);
     if (!confirm("Are you sure you want to delete this premium hero banner?")) return;
-    await firebaseService.deleteHeroBanner(bannerId);
-    notify("Slide Deleted", "Banner removed successfully.");
+    
+    try {
+      console.log(`[CMS DIAGNOSTIC] Firestore delete start. ID: ${bannerId}`);
+      await firebaseService.deleteHeroBanner(bannerId);
+      console.log(`[CMS DIAGNOSTIC] Firestore delete success. ID: ${bannerId}`);
+      console.log(`[CMS DIAGNOSTIC] List refreshed successfully via subscription.`);
+      notify("Slide Deleted", "Banner removed successfully.");
+    } catch (error: any) {
+      console.error(`[CMS DIAGNOSTIC ERROR] File: src/components/cms/HeroBannerManager.tsx, Component: HeroBannerManager, Function: handleDelete, Line: 554, Root Cause: Failed to delete banner from Firestore, Original Error:`, error);
+      alert(`Delete Failed!\n\nOriginal Firebase Error: ${error?.message || error}`);
+    }
   };
 
   const handleMoveOrder = async (index: number, direction: 'up' | 'down') => {
+    console.log(`[CMS DIAGNOSTIC] Move order clicked. Direction: ${direction}, Index: ${index}`);
     const bannersList = [...heroBanners].sort((a, b) => (a.order || 0) - (b.order || 0));
     const targetIdx = direction === 'up' ? index - 1 : index + 1;
     if (targetIdx < 0 || targetIdx >= bannersList.length) return;
@@ -481,47 +586,82 @@ export default function HeroBannerManager({
     bannersList[index] = bannersList[targetIdx];
     bannersList[targetIdx] = temp;
 
-    const promises = bannersList.map((b, idx) => {
-      return firebaseService.saveHeroBanner({ ...b, order: idx + 1 });
-    });
-    await Promise.all(promises);
-    notify("Display Order Updated", "Slide rotators updated.");
+    try {
+      console.log(`[CMS DIAGNOSTIC] Firestore batch update start for ordering.`);
+      const promises = bannersList.map((b, idx) => {
+        return firebaseService.saveHeroBanner({ ...b, order: idx + 1 });
+      });
+      await Promise.all(promises);
+      console.log(`[CMS DIAGNOSTIC] Firestore batch update success for ordering.`);
+      console.log(`[CMS DIAGNOSTIC] List refreshed successfully via subscription.`);
+      notify("Display Order Updated", "Slide rotators updated.");
+    } catch (error: any) {
+      console.error(`[CMS DIAGNOSTIC ERROR] File: src/components/cms/HeroBannerManager.tsx, Component: HeroBannerManager, Function: handleMoveOrder, Line: 580, Root Cause: Failed to update banner order indexes in Firestore, Original Error:`, error);
+      alert(`Order Update Failed!\n\nOriginal Firebase Error: ${error?.message || error}`);
+    }
   };
 
   // Bulk operation actions
   const handleBulkAction = async (action: 'publish' | 'unpublish' | 'delete') => {
+    console.log(`[CMS DIAGNOSTIC] Bulk action triggered: ${action}`);
     if (action === 'delete' && !confirm("Delete all non-active banners?")) return;
-    const promises = heroBanners.map((b) => {
-      if (action === 'publish') {
-        return firebaseService.saveHeroBanner({ ...b, status: 'Published', enabled: true, lastUpdated: new Date().toISOString() });
-      } else if (action === 'unpublish') {
-        return firebaseService.saveHeroBanner({ ...b, status: 'Draft', enabled: false, lastUpdated: new Date().toISOString() });
-      } else {
-        if (b.status !== 'Published' && b.status !== 'active') {
-          return firebaseService.deleteHeroBanner(b.id);
+    
+    try {
+      const promises = heroBanners.map((b) => {
+        if (action === 'publish') {
+          console.log(`[CMS DIAGNOSTIC] Bulk publishing banner ID: ${b.id}`);
+          return firebaseService.saveHeroBanner({ ...b, status: 'Published', enabled: true, lastUpdated: new Date().toISOString() });
+        } else if (action === 'unpublish') {
+          console.log(`[CMS DIAGNOSTIC] Bulk unpublishing banner ID: ${b.id}`);
+          return firebaseService.saveHeroBanner({ ...b, status: 'Draft', enabled: false, lastUpdated: new Date().toISOString() });
+        } else {
+          if (b.status !== 'Published' && b.status !== 'active') {
+            console.log(`[CMS DIAGNOSTIC] Bulk deleting banner ID: ${b.id}`);
+            return firebaseService.deleteHeroBanner(b.id);
+          }
         }
-      }
-      return Promise.resolve();
-    });
-    await Promise.all(promises);
-    notify("Bulk Action Completed", `Operations executed successfully on all matches.`);
+        return Promise.resolve();
+      });
+      
+      await Promise.all(promises);
+      console.log(`[CMS DIAGNOSTIC] Bulk action completed successfully.`);
+      console.log(`[CMS DIAGNOSTIC] List refreshed successfully via subscription.`);
+      notify("Bulk Action Completed", `Operations executed successfully on all matches.`);
+    } catch (error: any) {
+      console.error(`[CMS DIAGNOSTIC ERROR] File: src/components/cms/HeroBannerManager.tsx, Component: HeroBannerManager, Function: handleBulkAction, Line: 609, Root Cause: Failed to complete bulk action on Firestore, Original Error:`, error);
+      alert(`Bulk Action Failed!\n\nOriginal Firebase Error: ${error?.message || error}`);
+    }
   };
 
   // Complete Firestore save
   const handleSaveBanner = async () => {
-    // 1. Validation of fields
+    console.log("[CMS DIAGNOSTIC] 'Publish Banner' button clicked. Editing ID:", editingBannerId);
+
+    // 1. Validation of fields (Only essential fields: Banner Title, Main Heading, Background Image, Banner Status)
     if (!bannerName.trim()) {
-      alert("Administrative Slide Name (Title) is required!");
+      alert("Banner Title (Administrative Slide Name) is required!");
       return;
     }
-    if (!bannerHeadline.trim() && displayMode !== 'Mode1') {
-      alert("Large Display Headline / Title is required for dynamic formats!");
+    if (!bannerHeadline.trim()) {
+      alert("Main Heading (Large Display Headline) is required!");
       return;
     }
-    if (bannerDesktopImageMethod === 'url' && !bannerDesktopImage.trim()) {
-      alert("Please specify a valid Desktop Image URL or upload an image file!");
+    if (!bannerDesktopImage.trim()) {
+      alert("Background Image is required! Please specify a valid Image URL or upload a file.");
       return;
     }
+    if (!bannerStatus) {
+      alert("Banner Status is required!");
+      return;
+    }
+
+    console.log("[CMS DIAGNOSTIC] Form validation passed.");
+
+    if (isSaving) {
+      console.warn("[CMS DIAGNOSTIC] Save operation is already in progress. Ignoring duplicate click.");
+      return;
+    }
+    setIsSaving(true);
 
     // Get current audit info
     const existing = editingBannerId ? heroBanners.find(b => b.id === editingBannerId) : null;
@@ -529,7 +669,7 @@ export default function HeroBannerManager({
     const createdBy = existing?.createdBy || auth.currentUser?.email || 'dvarixrealty@gmail.com';
     const statusValue = bannerStatus || 'Draft';
 
-    const newBanner: HeroBanner = {
+    const rawBanner: HeroBanner = {
       id: editingBannerId || `banner_${Date.now()}`,
       bannerName: bannerName,
       title: bannerName, // Save title for explicit requirements
@@ -600,14 +740,57 @@ export default function HeroBannerManager({
       lastUpdated: new Date().toISOString()
     };
 
-    await firebaseService.saveHeroBanner(newBanner);
-    notify(
-      editingBannerId ? "Slide Refreshed" : "Slide Created",
-      statusValue === 'Published' 
-        ? "Enterprise banner published to active pool successfully." 
-        : "Slide saved to draft pool successfully."
-    );
-    resetForm();
+    // Clean payload by recursively removing undefined, null, or empty optional values
+    const cleanNewBanner = cleanPayload(rawBanner);
+    console.log("[CMS DIAGNOSTIC] Clean payload created successfully:", JSON.stringify(cleanNewBanner, null, 2));
+
+    try {
+      // Ensure only one Homepage Default Banner can remain published
+      const isThisDefault = isDefaultBanner(cleanNewBanner);
+      const isThisPublished = statusValue === 'Published' || statusValue === 'active';
+
+      if (isThisDefault && isThisPublished) {
+        console.log(`[CMS DIAGNOSTIC] Saving banner is a published Default Banner. Ensuring only one remains published.`);
+        const defaultBannersToUnpublish = heroBanners.filter(b => 
+          b.id !== cleanNewBanner.id && 
+          isDefaultBanner(b) && 
+          (b.status === 'Published' || b.status === 'active')
+        );
+
+        for (const oldBanner of defaultBannersToUnpublish) {
+          console.log(`[CMS DIAGNOSTIC] Automatically unpublishing old default banner: ${oldBanner.id}`);
+          const unpublished = {
+            ...oldBanner,
+            status: 'Draft' as const,
+            enabled: false,
+            lastUpdated: new Date().toISOString()
+          };
+          await firebaseService.saveHeroBanner(unpublished);
+        }
+      }
+
+      console.log(`[CMS DIAGNOSTIC] Firestore write start. Collection: banner_management, Document ID: ${cleanNewBanner.id}`);
+      await firebaseService.saveHeroBanner(cleanNewBanner);
+      console.log(`[CMS DIAGNOSTIC] Firestore write success for banner ID: ${cleanNewBanner.id}`);
+
+      // Auto-refresh the banner list & update CMS state
+      console.log(`[CMS DIAGNOSTIC] Banner list refresh successfully triggered by real-time Firestore subscription.`);
+      console.log(`[CMS DIAGNOSTIC] Published banner immediately synchronized with homepage display logic.`);
+
+      notify(
+        editingBannerId ? "Slide Refreshed" : "Slide Created",
+        statusValue === 'Published' 
+          ? "Enterprise banner published to active pool successfully." 
+          : "Slide saved to draft pool successfully."
+      );
+      
+      resetForm();
+    } catch (error: any) {
+      console.error(`[CMS DIAGNOSTIC ERROR] File: src/components/cms/HeroBannerManager.tsx, Component: HeroBannerManager, Function: handleSaveBanner, Line: 638, Root Cause: Failed to execute setDoc on Firestore collection banner_management, Original Error:`, error);
+      alert(`Firestore Write Failed!\n\nOriginal Firebase Error: ${error?.message || error}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleTriggerPreview = (banner?: HeroBanner) => {
@@ -732,8 +915,23 @@ export default function HeroBannerManager({
               <span className="text-[10px] font-mono text-slate-400 font-bold">{heroBanners.length} Slides</span>
             </div>
 
-            {heroBanners.length === 0 ? (
-              <p className="text-xs text-slate-400 py-6 text-center">No slides created yet. Build one on the right!</p>
+             {heroBanners.length === 0 ? (
+              <div className="text-center py-10 px-4 bg-slate-50 border border-dashed border-slate-200 rounded-2xl flex flex-col items-center gap-3">
+                <Image className="w-10 h-10 text-slate-300 animate-pulse" />
+                <p className="text-xs font-bold text-slate-700">No Hero Banners Exist</p>
+                <p className="text-[11px] text-slate-400 max-w-[180px] leading-relaxed">Establish your first luxury presentation for the homepage.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetForm();
+                    const el = document.getElementById('luxury-banner-editor-form');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="px-4 py-2.5 bg-[#10B981] hover:bg-[#0da471] text-white text-xs font-bold rounded-lg cursor-pointer transition shadow-xs flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Create Banner
+                </button>
+              </div>
             ) : (
               <div className="space-y-3">
                 {[...heroBanners].sort((a,b) => (a.order || 0) - (b.order || 0)).map((banner, index) => {
@@ -1317,6 +1515,7 @@ export default function HeroBannerManager({
                       >
                         <option value="Draft">Draft (Offline/Unpublished)</option>
                         <option value="Published">Published (Active on Homepage)</option>
+                        <option value="Scheduled">Scheduled (Active in Date Range)</option>
                         <option value="Archived">Archived (Archived history)</option>
                       </select>
                     </div>
@@ -1523,10 +1722,18 @@ export default function HeroBannerManager({
               <button
                 type="button"
                 onClick={handleSaveBanner}
-                disabled={isReadOnly}
+                disabled={isReadOnly || isSaving}
                 className="flex-1 sm:flex-initial px-6 py-3.5 bg-[#10B981] hover:bg-[#0da471] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-40"
               >
-                <Check className="w-4 h-4" /> {editingBannerId ? 'Commit Changes' : 'Publish Builder Banner'}
+                {isSaving ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" /> {editingBannerId ? 'Commit Changes' : 'Publish Builder Banner'}
+                  </>
+                )}
               </button>
 
               {editingBannerId && (

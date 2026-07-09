@@ -106,7 +106,7 @@ export default function InquiryDashboard({
 }: InquiryDashboardProps) {
 
   // Collapsible sidebar state
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
 
   // Mobile drawer state
   const [isMobileOpen, setIsMobileOpen] = useState(false);
@@ -2104,7 +2104,7 @@ AI STRATEGY PROPOSAL:
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex font-sans" id="enterprise-crm-workspace">
+    <div className="h-screen bg-slate-50 flex font-sans overflow-hidden" id="enterprise-crm-workspace">
       <style>{dynamicStyles}</style>
       
       {/* 0. MOBILE BACKDROP OVERLAY */}
@@ -2122,13 +2122,15 @@ AI STRATEGY PROPOSAL:
 
       {/* 1. REDESIGNED LUXURY ENTERPRISE SIDEBAR */}
       <aside 
+        onMouseEnter={() => setIsSidebarCollapsed(false)}
+        onMouseLeave={() => setIsSidebarCollapsed(true)}
         className={`bg-[#0B1F3A] text-slate-100 flex flex-col justify-between shrink-0 transition-all duration-300 border-r border-[#1e2d4a]/40 shadow-2xl z-50
-          lg:static lg:translate-x-0 lg:flex
+          lg:sticky lg:top-0 lg:h-screen lg:flex lg:translate-x-0
           fixed inset-y-0 left-0 transform ${
             isMobileOpen ? 'translate-x-0' : '-translate-x-full'
           } ${
-            isSidebarCollapsed ? 'lg:w-16' : 'lg:w-64'
-          } w-64 lg:h-auto h-screen`}
+            isSidebarCollapsed ? 'lg:w-[72px]' : 'lg:w-[280px]'
+          } w-64 h-screen`}
       >
         <div>
           {/* Corporate brand stamp */}
@@ -2294,7 +2296,7 @@ AI STRATEGY PROPOSAL:
       </aside>
 
       {/* 2. MAIN ACTIVE WORKSPACE PANEL */}
-      <section className="flex-1 flex flex-col min-w-0">
+      <section className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         
         {/* STICKY UPPER HEADER */}
         <header className="sticky top-0 bg-white border-b border-slate-200 h-16 flex items-center justify-between px-6 z-10 shadow-xs">

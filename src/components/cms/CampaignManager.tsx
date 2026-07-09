@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { 
   Plus, Edit, Trash2, Copy, ArrowUp, ArrowDown, Search, Filter, 
   Eye, FileText, Check, X, Calendar, User, Tag, Layout, Settings, 
@@ -12,9 +12,76 @@ interface CampaignManagerProps {
   setSiteSettings?: (newSettings: SiteCMSConfig) => void;
 }
 
-export default function CampaignManager({ siteSettings, setSiteSettings }: CampaignManagerProps) {
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class CampaignErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState;
+  props: ErrorBoundaryProps;
+
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+    this.props = props;
+  }
+
+  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error(
+      `[CMS DIAGNOSTIC ERROR]\n` +
+      `File path: src/components/cms/CampaignManager.tsx\n` +
+      `Component name: CampaignManager\n` +
+      `Line number: (caught in component lifecycle)\n` +
+      `Root cause: ${error.message}\n` +
+      `Stack trace:`, 
+      error, 
+      errorInfo
+    );
+  }
+
+  public render() {
+    if (this.state.hasError) {
+      return (
+        <div className="bg-red-50 border border-red-200 p-6 rounded-2xl text-center space-y-3 max-w-lg mx-auto my-8">
+          <div className="text-red-600 font-bold text-lg flex items-center justify-center gap-2">
+            <AlertCircle className="h-6 w-6 text-red-500 animate-bounce" />
+            <span>Campaign Manager Error</span>
+          </div>
+          <p className="text-xs text-red-500 leading-relaxed font-light">
+            We encountered a live render issue inside the Campaigns dashboard. This has been logged for enterprise diagnostics.
+          </p>
+          <div className="bg-slate-900 text-slate-100 p-3 rounded-lg text-left font-mono text-[10px] overflow-auto max-h-40">
+            {this.state.error?.toString()}
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition"
+          >
+            Reload Dashboard
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+export function InnerCampaignManager({ siteSettings, setSiteSettings }: CampaignManagerProps) {
   const [campaigns, setCampaigns] = useState<CampaignService[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Preview State
+  const [previewingCampaign, setPreviewingCampaign] = useState<CampaignService | null>(null);
 
   // Search and Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -402,17 +469,17 @@ export default function CampaignManager({ siteSettings, setSiteSettings }: Campa
           <p className="text-xs">Loading services & campaigns...</p>
         </div>
       ) : filteredCampaigns.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl py-16 text-center space-y-3 shadow-xs">
-          <FolderOpen className="h-10 w-10 text-slate-300 mx-auto" />
-          <h4 className="text-sm font-semibold text-slate-800">No campaigns found</h4>
+        <div className="bg-white border border-slate-200 rounded-2xl py-16 text-center space-y-3 shadow-xs" id="campaigns-empty-state">
+          <div className="text-3xl">📢</div>
+          <h4 className="text-sm font-bold text-slate-800">No Campaigns Found</h4>
           <p className="text-xs text-slate-400 max-w-xs mx-auto font-light leading-relaxed">
-            There are no campaigns matching your current filters. Add a new campaign to display on the live website.
+            Create your first marketing campaign.
           </p>
           <button
             onClick={handleOpenAdd}
-            className="px-4 py-2 bg-slate-900 border border-slate-900 rounded-xl text-white text-xs font-semibold hover:bg-slate-800 transition"
+            className="px-4 py-2 bg-[#ff5a3c] hover:bg-[#e04326] text-white text-xs font-semibold rounded-xl transition flex items-center gap-1.5 mx-auto cursor-pointer"
           >
-            Create First Campaign
+            <Plus className="h-4 w-4" /> Create Campaign
           </button>
         </div>
       ) : (
@@ -428,7 +495,17 @@ export default function CampaignManager({ siteSettings, setSiteSettings }: Campa
                 className="bg-white border border-slate-200 rounded-2xl overflow-hidden hover:shadow-md transition-all duration-300 flex flex-col group relative"
               >
                 {/* Visual Status Indicator Badge */}
-                <div className="absolute top-3 right-3 z-10 flex gap-1.5">
+                <div className="absolute top-3 right-3 z-10 flex gap-1.5 flex-wrap justify-end max-w-[70%]">
+                  {campaign.featured && (
+                    <span className="text-[9px] uppercase font-mono font-bold px-2 py-0.5 rounded shadow-xs bg-amber-500 text-white border border-amber-600">
+                      ★ FEATURED
+                    </span>
+                  )}
+                  {campaign.showOnHomepage !== false && (
+                    <span className="text-[9px] uppercase font-mono font-bold px-2 py-0.5 rounded shadow-xs bg-sky-500 text-white border border-sky-600">
+                      ⌂ HOME
+                    </span>
+                  )}
                   <span className={`text-[9px] uppercase font-mono font-bold px-2 py-0.5 rounded shadow-xs ${
                     campaign.status === 'Published' 
                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
@@ -450,10 +527,15 @@ export default function CampaignManager({ siteSettings, setSiteSettings }: Campa
                     className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-500"
                     referrerPolicy="no-referrer"
                   />
-                  <div className="absolute bottom-3 left-3">
+                  <div className="absolute bottom-3 left-3 flex gap-1 items-center">
                     <span className="text-[9px] uppercase font-mono font-black bg-[#ff5a3c] text-white px-2.5 py-1 rounded shadow-xs">
                       {campaign.badge}
                     </span>
+                    {campaign.campaignType && (
+                      <span className="text-[9px] uppercase font-mono font-bold bg-indigo-600 text-white px-2 py-1 rounded shadow-xs">
+                        {campaign.campaignType}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -530,39 +612,87 @@ export default function CampaignManager({ siteSettings, setSiteSettings }: Campa
                       </span>
                     </div>
 
-                    {/* CRUD Actions */}
-                    <div className="flex items-center gap-1.5">
+                    {/* Actions and Live Preview */}
+                    <div className="flex flex-wrap items-center gap-1.5 justify-end">
+                      {/* Live Preview Button */}
                       <button
-                        onClick={() => handleToggleStatus(campaign)}
-                        className={`p-1.5 rounded-lg border text-[10px] uppercase font-bold tracking-wider ${
-                          campaign.status === 'Published'
-                            ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'
-                            : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
-                        }`}
-                        title={campaign.status === 'Published' ? "Mark Draft (Unpublish)" : "Publish Live"}
+                        onClick={() => setPreviewingCampaign(campaign)}
+                        className="px-2 py-1 rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition"
+                        title="Open Interactive Live Simulation"
                       >
-                        {campaign.status === 'Published' ? 'LIVE' : 'DRAFT'}
+                        <Eye className="h-3 w-3" /> PREVIEW
                       </button>
-                      
+
+                      {/* Publish / Unpublish Toggle */}
+                      {campaign.status !== 'Published' ? (
+                        <button
+                          onClick={() => {
+                            const updated = { ...campaign, status: 'Published' as const, updatedAt: new Date().toISOString() };
+                            const newList = campaigns.map(c => c.id === campaign.id ? updated : c);
+                            setCampaigns(newList);
+                            firebaseService.saveCampaignService(updated);
+                            syncToSiteSettings(newList);
+                          }}
+                          className="px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-bold cursor-pointer transition"
+                          title="Publish Live"
+                        >
+                          PUBLISH
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            const updated = { ...campaign, status: 'Draft' as const, updatedAt: new Date().toISOString() };
+                            const newList = campaigns.map(c => c.id === campaign.id ? updated : c);
+                            setCampaigns(newList);
+                            firebaseService.saveCampaignService(updated);
+                            syncToSiteSettings(newList);
+                          }}
+                          className="px-2 py-1 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 text-[10px] font-bold cursor-pointer transition"
+                          title="Unpublish Campaign"
+                        >
+                          UNPUBLISH
+                        </button>
+                      )}
+
+                      {/* Archive Button */}
+                      {campaign.status !== 'Expired' && (
+                        <button
+                          onClick={() => {
+                            const updated = { ...campaign, status: 'Expired' as const, updatedAt: new Date().toISOString() };
+                            const newList = campaigns.map(c => c.id === campaign.id ? updated : c);
+                            setCampaigns(newList);
+                            firebaseService.saveCampaignService(updated);
+                            syncToSiteSettings(newList);
+                          }}
+                          className="px-1.5 py-1 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700 text-[10px] font-bold cursor-pointer transition"
+                          title="Archive Campaign"
+                        >
+                          ARCHIVE
+                        </button>
+                      )}
+
+                      {/* Duplicate */}
                       <button
                         onClick={() => handleDuplicate(campaign)}
-                        className="p-1.5 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-500"
-                        title="Duplicate Campaign"
+                        className="p-1.5 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-500 cursor-pointer"
+                        title="Duplicate"
                       >
                         <Copy className="h-3.5 w-3.5" />
                       </button>
 
+                      {/* Edit */}
                       <button
                         onClick={() => handleOpenEdit(campaign)}
-                        className="p-1.5 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-500"
+                        className="p-1.5 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-500 cursor-pointer"
                         title="Edit Details"
                       >
                         <Edit className="h-3.5 w-3.5" />
                       </button>
 
+                      {/* Delete */}
                       <button
                         onClick={() => handleDelete(campaign.id)}
-                        className="p-1.5 rounded-lg border border-red-100 hover:border-red-200 hover:bg-red-50 text-red-500"
+                        className="p-1.5 rounded-lg border border-red-100 hover:border-red-200 hover:bg-red-50 text-red-500 cursor-pointer"
                         title="Delete Campaign"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -677,6 +807,48 @@ export default function CampaignManager({ siteSettings, setSiteSettings }: Campa
                         onChange={(e) => setEditingCampaign(prev => prev ? { ...prev, displayOrder: parseInt(e.target.value) || 1 } : null)}
                         className="w-full border border-slate-200 p-2.5 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-light"
                       />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 bg-slate-50 p-3 rounded-xl border border-slate-150">
+                    <div className="space-y-1 col-span-1">
+                      <label className="text-[10px] font-extrabold uppercase text-slate-450">Campaign Type</label>
+                      <select
+                        value={editingCampaign.campaignType || 'Discount Offer'}
+                        onChange={(e) => setEditingCampaign(prev => prev ? { ...prev, campaignType: e.target.value } : null)}
+                        className="w-full border border-slate-200 p-2.5 rounded-lg text-xs text-slate-800 bg-white"
+                      >
+                        <option value="Discount Offer">Discount Offer</option>
+                        <option value="Consultation">Consultation</option>
+                        <option value="Marketing Launch">Marketing Launch</option>
+                        <option value="Special Event">Special Event</option>
+                        <option value="Partnership">Partnership</option>
+                        <option value="Premium Service">Premium Service</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-5">
+                      <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={editingCampaign.showOnHomepage !== false}
+                          onChange={(e) => setEditingCampaign(prev => prev ? { ...prev, showOnHomepage: e.target.checked } : null)}
+                          className="rounded border-slate-300 text-[#ff5a3c] focus:ring-[#ff5a3c]"
+                        />
+                        Show on Homepage
+                      </label>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-5">
+                      <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={editingCampaign.featured === true}
+                          onChange={(e) => setEditingCampaign(prev => prev ? { ...prev, featured: e.target.checked } : null)}
+                          className="rounded border-slate-300 text-[#ff5a3c] focus:ring-[#ff5a3c]"
+                        />
+                        Featured Campaign
+                      </label>
                     </div>
                   </div>
 
@@ -1149,6 +1321,118 @@ export default function CampaignManager({ siteSettings, setSiteSettings }: Campa
         </div>
       )}
 
+      {/* Live Preview Modal */}
+      {previewingCampaign && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-slate-900 text-white rounded-3xl max-w-2xl w-full border border-slate-700 shadow-2xl overflow-hidden relative flex flex-col">
+            
+            {/* Header */}
+            <div className="p-4 bg-slate-800/80 border-b border-slate-700/80 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+                <span className="text-xs font-mono tracking-wider text-slate-400 uppercase">Live Website Render Simulation</span>
+              </div>
+              <button 
+                onClick={() => setPreviewingCampaign(null)}
+                className="p-1 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Simulated Website Hero Area */}
+            <div className="relative h-64 bg-slate-950 overflow-hidden flex items-end">
+              <img 
+                src={previewingCampaign.image || 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=600&q=80'} 
+                alt={previewingCampaign.title}
+                className="absolute inset-0 w-full h-full object-cover opacity-45"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />
+
+              {/* Text Area */}
+              <div className="p-8 relative z-10 space-y-3 w-full">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest bg-[#ff5a3c] text-white px-2.5 py-1 rounded-md shadow-lg">
+                    {previewingCampaign.badge || 'PROMOTION'}
+                  </span>
+                </div>
+                <h1 className="text-2xl md:text-3xl font-black tracking-tight leading-tight text-left">
+                  {previewingCampaign.title || 'Untitled Campaign'}
+                </h1>
+                <p className="text-sm text-slate-300 max-w-xl font-light text-left">
+                  {previewingCampaign.shortDescription || 'Short description goes here...'}
+                </p>
+              </div>
+            </div>
+
+            {/* Description & Buttons Area */}
+            <div className="p-8 bg-slate-950 border-t border-slate-850 space-y-6 text-left">
+              <div className="space-y-2">
+                <span className="text-[10px] font-mono tracking-wider text-slate-500 uppercase block">Campaign Description</span>
+                <p className="text-xs text-slate-400 leading-relaxed font-light">
+                  {previewingCampaign.fullDescription || 'No detailed description specified.'}
+                </p>
+              </div>
+
+              {/* Call To Action Button Simulation */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {previewingCampaign.button1 && (
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col justify-between gap-3 hover:border-slate-700 transition">
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-mono text-indigo-400 block uppercase font-bold">Button 1 (Primary)</span>
+                      <p className="text-xs font-semibold text-slate-200">{previewingCampaign.button1.text || 'Primary Button'}</p>
+                      <p className="text-[10px] text-slate-400">Action: <span className="text-indigo-300">{previewingCampaign.button1.action}</span></p>
+                    </div>
+                    <button 
+                      onClick={() => alert(`Simulated Primary Action: ${previewingCampaign.button1?.action}\nValue: ${previewingCampaign.button1?.value || 'None'}`)}
+                      className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                    >
+                      Trigger Primary Click
+                    </button>
+                  </div>
+                )}
+
+                {previewingCampaign.button2 && (
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col justify-between gap-3 hover:border-slate-700 transition">
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-mono text-emerald-400 block uppercase font-bold">Button 2 (Secondary)</span>
+                      <p className="text-xs font-semibold text-slate-200">{previewingCampaign.button2.text || 'Secondary Button'}</p>
+                      <p className="text-[10px] text-slate-400">Action: <span className="text-emerald-300">{previewingCampaign.button2.action}</span></p>
+                    </div>
+                    <button 
+                      onClick={() => alert(`Simulated Secondary Action: ${previewingCampaign.button2?.action}\nValue: ${previewingCampaign.button2?.value || 'None'}`)}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                    >
+                      Trigger Secondary Click
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-900 border-t border-slate-850 flex justify-end">
+              <button
+                onClick={() => setPreviewingCampaign(null)}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-semibold rounded-xl transition cursor-pointer"
+              >
+                Close Simulation
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
+  );
+}
+
+export default function CampaignManager(props: CampaignManagerProps) {
+  return (
+    <CampaignErrorBoundary>
+      <InnerCampaignManager {...props} />
+    </CampaignErrorBoundary>
   );
 }
