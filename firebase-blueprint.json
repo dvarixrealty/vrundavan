@@ -222,6 +222,50 @@
         "flows": { "type": "string" }
       },
       "required": ["id", "botName"]
+    },
+    "CampaignService": {
+      "title": "CampaignService",
+      "description": "Dynamic CMS Campaign Service configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "badge": { "type": "string" },
+        "shortDescription": { "type": "string" },
+        "fullDescription": { "type": "string" },
+        "image": { "type": "string" },
+        "category": { "type": "string" },
+        "displayOrder": { "type": "number" },
+        "status": { "type": "string", "enum": ["Draft", "Published", "Scheduled", "Expired", "Hidden"] },
+        "publishDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "autoPublish": { "type": "boolean" },
+        "autoExpire": { "type": "boolean" },
+        "views": { "type": "number" },
+        "clicks": { "type": "number" },
+        "submissions": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "status"]
+    },
+    "FreeServiceRequest": {
+      "title": "FreeServiceRequest",
+      "description": "User submitted free service or campaign requests",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "requestedServiceId": { "type": "string" },
+        "requestedServiceName": { "type": "string" },
+        "submittedDate": { "type": "string" },
+        "assignedAdvisorId": { "type": "string" },
+        "assignedAdvisorName": { "type": "string" },
+        "status": { "type": "string", "enum": ["New", "Contacted", "In Progress", "Completed"] }
+      },
+      "required": ["id", "customerName", "phone", "email", "requestedServiceId", "requestedServiceName", "submittedDate"]
     }
   },
   "firestore": {
@@ -272,6 +316,18 @@
     "/chatbot_settings": {
       "schema": "ChatbotSetting",
       "description": "Chatbot personality and widget custom parameters"
+    },
+    "/campaign_services": {
+      "schema": "CampaignService",
+      "description": "Campaign-driven Free Services configuration"
+    },
+    "/campaign_requests": {
+      "schema": "FreeServiceRequest",
+      "description": "Free Service / Campaign requests lead registry"
+    },
+    "/settings": {
+      "schema": "object",
+      "description": "Global CMS and application settings"
     }
   }
 }

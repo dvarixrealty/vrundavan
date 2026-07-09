@@ -101,9 +101,16 @@ export interface FAQ {
   answer: string;
   category: 'General Questions' | 'Property Search' | 'Requirements' | 'Site Visits' | 'Buying Process' | 'Selling Process' | 'Investment' | string;
   displayOrder: number;
-  status: 'Active' | 'Draft';
+  status: 'Active' | 'Draft' | 'Published' | 'Hidden' | string;
   featured: boolean;
   lastUpdated: string;
+  showOnHomepage?: boolean;
+  homepageOrder?: number;
+  homepageStatus?: 'Visible' | 'Hidden';
+  published?: boolean;
+  homepageVisible?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Property {
@@ -269,7 +276,114 @@ export interface CustomRequirement {
   submissionType?: 'Requirement' | 'Consultation' | 'Site Visit';
 }
 
-export type ActiveTab = 'Home' | 'Properties' | 'Contact' | 'Admin' | 'About';
+export type ActiveTab = 'Home' | 'Properties' | 'Contact' | 'Admin' | 'About' | 'PrivacyPolicy' | 'Terms' | 'Insights';
+
+export interface BlogComment {
+  id: string;
+  authorName: string;
+  content: string;
+  timestamp: string;
+}
+
+export interface BlogArticle {
+  id: string;
+  title: string;
+  slug: string;
+  summary: string;
+  content: string;
+  featuredImage: string;
+  category: string;
+  tags: string[];
+  author: string;
+  status: 'Draft' | 'Published' | 'Scheduled' | 'Archived';
+  featured: boolean;
+  displayOrder: number;
+  readingTime: string;
+  seoTitle: string;
+  seoDescription: string;
+  publishDate: string;
+  updatedAt: string;
+  createdAt: string;
+  commentsEnabled?: boolean;
+  comments?: BlogComment[];
+  published?: boolean; // For backwards compatibility
+  image?: string;      // For backwards compatibility
+  date?: string;       // For backwards compatibility
+  excerpt?: string;    // For backwards compatibility
+}
+
+export interface CampaignButtonSettings {
+  text: string;
+  icon: string;
+  action: 'Open Popup Form' | 'Open Internal Page' | 'Open External URL' | 'WhatsApp' | 'Phone Call' | 'Email' | 'Book Site Visit' | 'Property Search' | 'Download PDF';
+  value?: string;
+}
+
+export interface CampaignFieldConfig {
+  enabled: boolean;
+  required: boolean;
+}
+
+export interface CampaignFormFieldsConfig {
+  fullName: CampaignFieldConfig;
+  mobileNumber: CampaignFieldConfig;
+  emailAddress: CampaignFieldConfig;
+  city: CampaignFieldConfig;
+  budget: CampaignFieldConfig;
+  propertyType: CampaignFieldConfig;
+  preferredLocation: CampaignFieldConfig;
+  message: CampaignFieldConfig;
+  uploadDocuments: CampaignFieldConfig;
+  uploadImages: CampaignFieldConfig;
+}
+
+export interface CampaignService {
+  id: string;
+  title: string;
+  badge: string;
+  shortDescription: string;
+  fullDescription: string;
+  image: string;
+  category: string;
+  displayOrder: number;
+  status: 'Draft' | 'Published' | 'Scheduled' | 'Expired' | 'Hidden';
+  publishDate: string;
+  expiryDate: string;
+  autoPublish: boolean;
+  autoExpire: boolean;
+  button1: CampaignButtonSettings;
+  button2: CampaignButtonSettings;
+  formFields: CampaignFormFieldsConfig;
+  afterSubmission: {
+    action: 'Thank You Popup' | 'Redirect to Page' | 'Redirect to WhatsApp' | 'Redirect to Contact Page';
+    value: string;
+  };
+  views: number;
+  clicks: number;
+  submissions: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FreeServiceRequest {
+  id: string;
+  customerName: string;
+  phone: string;
+  email: string;
+  requestedServiceId: string;
+  requestedServiceName: string;
+  submittedDate: string;
+  assignedAdvisorId: string;
+  assignedAdvisorName: string;
+  status: 'New' | 'Contacted' | 'In Progress' | 'Completed';
+  city?: string;
+  budget?: string;
+  propertyType?: string;
+  preferredLocation?: string;
+  message?: string;
+  uploadedDocuments?: string[];
+  uploadedImages?: string[];
+}
 
 export interface PermissionSet {
   canManageProperties: boolean;
@@ -548,16 +662,12 @@ export interface SiteCMSConfig {
   }[];
   
   // Blog / News / Announcements list
-  blogs?: {
-    id: string;
-    title: string;
-    excerpt: string;
-    content: string;
-    image: string;
-    date: string;
-    author: string;
-    published: boolean;
-  }[];
+  blogs?: BlogArticle[];
+  blogSettings?: {
+    showSection: boolean;
+    maxArticles: number;
+  };
+  blogCategories?: string[];
 
   // Services list
   services?: {
@@ -576,8 +686,323 @@ export interface SiteCMSConfig {
     validTill?: string;
     image?: string;
     active: boolean;
+    button1?: CampaignButtonSettings;
+    button2?: CampaignButtonSettings;
+    formFields?: CampaignFormFieldsConfig;
+    afterSubmission?: {
+      action: 'Thank You Popup' | 'Redirect to Page' | 'Redirect to WhatsApp' | 'Redirect to Contact Page';
+      value?: string;
+    };
   }[];
+  heroBanners?: HeroBanner[];
+  carouselSettings?: CarouselSettings;
+  statisticsCards?: StatisticCard[];
+  statisticsSettings?: StatisticsSettings;
+  footerConfig?: FooterCMSConfig;
+  faqSettings?: FAQSettings;
 }
+
+export interface FAQSettings {
+  defaultCategory: string; // 'All' | 'General Questions' | 'Property Search' | 'Requirements' | 'Site Visits' | 'Buying Process' | 'Investment'
+  maxFaqsToDisplay: number; // 5 | 10 | 15 | 20
+  showCategoryNavigation: boolean;
+  showAllCategory: boolean;
+  enableViewAllButton: boolean;
+  displayOnlyFeatured: boolean;
+  enableHomepageFAQSection: boolean;
+}
+
+export interface FooterLink {
+  label: string;
+  url: string; // Dynamic tab name or url
+}
+
+export interface FooterCTA {
+  text: string;
+  type: 'tab' | 'action' | 'url';
+  target: string; // tab e.g. "Properties" or custom
+  icon?: string; // Predefined icon code
+}
+
+export interface FooterSocialLink {
+  platform: 'instagram' | 'facebook' | 'linkedin' | 'youtube' | 'twitter';
+  url: string;
+  enabled: boolean;
+}
+
+export interface FooterTrustCard {
+  id: string;
+  title: string;
+  description: string;
+  icon: string; // Lucide icon name or emoji
+}
+
+export interface FooterCMSConfig {
+  logoText: string;
+  brandDescription: string;
+  ctas: FooterCTA[];
+  companyLinks: FooterLink[];
+  servicesLinks: FooterLink[];
+  quickLinks: FooterLink[];
+  address: string;
+  phone: string;
+  email: string;
+  socials: FooterSocialLink[];
+  trustCards: FooterTrustCard[];
+  copyrightText: string;
+  reraBadgeText: string;
+  reraSubtext?: string;
+  enableSkyline: boolean;
+  enableTrustStrip: boolean;
+  showSocialIcons: boolean;
+  sectionOrder: string[]; // e.g. ["brand", "company", "services", "quickLinks", "contact"]
+  businessHours?: string;
+  whatsappNumber?: string;
+  googleMapsUrl?: string;
+}
+
+export interface StatisticCard {
+  id: string;
+  icon: string; // Emoji or Lucide icon name, e.g. "🏠", "📍", "😊", "⭐", "🤝", "🎧"
+  number: string; // e.g. "450+", "25+", "500+", "98%", "15+", "24/7"
+  title: string; // e.g. "Verified Properties", "Prime Locations", "Happy Clients"
+  description?: string; // Optional description
+  displayOrder: number;
+  enabled: boolean;
+}
+
+export interface StatisticsSettings {
+  animationDuration: number; // in seconds
+  animationDelay: number; // in milliseconds
+}
+
+export interface BannerButtonConfig {
+  text: string;
+  destinationType: 'internal' | 'external' | 'custom' | 'category' | 'property' | 'contact' | 'custom-request' | 'listings' | 'requirements';
+  destinationValue: string;
+  openInNewTab: boolean;
+  show?: boolean;
+  style?: 'primary' | 'secondary' | 'outline';
+}
+
+export interface HeroBanner {
+  id: string;
+  headline: string; // Title / headline
+  subheading?: string; // Subtitle / subheading
+  description: string;
+  badgeText: string;
+  propertyCountBadge: string;
+  
+  // Image options
+  desktopImageMethod: 'upload' | 'url';
+  desktopImage: string; // Image URL or Base64
+  mobileImageMethod: 'upload' | 'url';
+  mobileImage: string; // Image URL or Base64
+  tabletImage?: string;
+
+  // Button settings
+  primaryButtonConfig?: BannerButtonConfig;
+  secondaryButtonConfig?: BannerButtonConfig;
+  
+  // Backward compatibility legacy fields
+  primaryButtonText?: string;
+  primaryButtonUrl?: string;
+  secondaryButtonText?: string;
+  secondaryButtonUrl?: string;
+
+  // Display settings
+  order: number;
+  status: 'active' | 'inactive' | 'draft' | 'Published' | 'Hidden' | 'Scheduled' | 'Draft' | 'Archived';
+  enabled: boolean; // Map status === 'active' to enabled for compatibility
+
+  // Schedule
+  publishDate?: string; // Start date
+  expiryDate?: string; // End date
+  
+  // Audit metadata
+  lastUpdated: string;
+
+  // --- NEW ENTERPRISE CMS PROPERTIES ---
+  bannerName?: string;
+  highlightText?: string;
+  createdAt?: string;
+  updatedAt?: string;
+
+  // Layout settings
+  layout?: {
+    contentPosition: 'left' | 'center' | 'right';
+    verticalAlignment: 'top' | 'center' | 'bottom';
+    contentWidth: 'small' | 'medium' | 'large';
+    heroImagePosition: 'left' | 'right';
+    heroImageWidth: number; // slider value (e.g. percentage 40-100)
+    heroImageBorderRadius: number; // slider value (e.g. px 0-48)
+  };
+
+  // Text Controls
+  textSettings?: {
+    headingColor?: string;
+    highlightColor?: string;
+    descriptionColor?: string;
+    headingFontSize?: number; // slider/select value
+    subheadingFontSize?: number;
+    descriptionFontSize?: number;
+    maxContentWidth?: number; // max width of content container
+  };
+
+  // Background Controls
+  backgroundSettings?: {
+    backgroundImage?: string;
+    backgroundColor?: string;
+    gradientBackground?: string;
+    overlayEnabled?: boolean;
+    overlayOpacity?: number; // 0 to 100
+    backgroundPosition?: string; // e.g. center, top, bottom
+    backgroundSize?: string; // e.g. cover, contain
+  };
+
+  // Floating Badge
+  floatingBadge?: {
+    enabled?: boolean;
+    position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+    icon?: string;
+    count?: string;
+    label?: string;
+  };
+
+  // Animation settings
+  animation?: {
+    enabled?: boolean;
+    type?: 'fade' | 'slide-left' | 'slide-right' | 'zoom' | 'scale';
+    duration?: number; // seconds
+  };
+
+  // Dynamic CMS custom builder properties
+  [key: string]: any;
+}
+
+export interface CarouselSettings {
+  autoPlay: boolean;
+  autoSlideDuration: number; // 3, 5, 7, 10
+  transitionSpeed: 'fast' | 'normal' | 'slow';
+  showNavigationArrows: boolean;
+  showPaginationDots: boolean;
+  pauseOnHover: boolean;
+  infiniteLoop: boolean;
+}
+
+export interface AdminTheme {
+  themeId: string;
+  themeName: string;
+  createdBy: string;
+  updatedAt: string;
+  sidebar: {
+    background: string;
+    hover: string;
+    active: string;
+    border: string;
+    shadow: string;
+    text: string;
+    activeText: string;
+    icon: string;
+    activeIcon: string;
+    divider: string;
+    badgeBg: string;
+    badgeText: string;
+    accordionBg: string;
+    accordionHover: string;
+    accordionBorder: string;
+  };
+  header: {
+    background: string;
+    border: string;
+    text: string;
+    searchBg: string;
+    notificationIcon: string;
+    profileIcon: string;
+    shadow: string;
+  };
+  content: {
+    background: string;
+    pageBg: string;
+    cards: string;
+    tables: string;
+    forms: string;
+    dialogs: string;
+    popups: string;
+    drawer: string;
+  };
+  buttons: {
+    primaryBg: string;
+    primaryText: string;
+    secondaryBg: string;
+    secondaryText: string;
+    successBg: string;
+    successText: string;
+    dangerBg: string;
+    dangerText: string;
+    warningBg: string;
+    warningText: string;
+    infoBg: string;
+    infoText: string;
+    hoverOpacity: number;
+    shadow: string;
+    borderRadius: string;
+  };
+  inputs: {
+    background: string;
+    border: string;
+    focusBorder: string;
+    placeholder: string;
+    checkbox: string;
+    radio: string;
+    switchBg: string;
+    dropdown: string;
+  };
+  typography: {
+    headingFont: string;
+    bodyFont: string;
+    sidebarFont: string;
+    menuWeight: string;
+    headingWeight: string;
+    buttonWeight: string;
+    fontSize: string;
+    letterSpacing: string;
+  };
+  icons: {
+    pack: string;
+    size: string;
+    color: string;
+    activeColor: string;
+    hoverColor: string;
+    rounded: boolean;
+    outlined: boolean;
+    filled: boolean;
+  };
+  borderRadius: {
+    global: string;
+    cards: string;
+    buttons: string;
+    inputs: string;
+    sidebar: string;
+    dropdown: string;
+    dialogs: string;
+    sliders: string;
+  };
+  shadowSettings: {
+    type: 'None' | 'Soft' | 'Medium' | 'Luxury' | 'Glass' | 'Deep' | string;
+  };
+  layout: {
+    sidebarWidth: string;
+    expandedWidth: string;
+    miniWidth: string;
+    headerHeight: string;
+    contentWidth: 'Compact' | 'Comfortable' | 'Spacious' | string;
+    compactMode: boolean;
+    comfortableMode: boolean;
+    spaciousMode: boolean;
+  };
+}
+
 
 
 

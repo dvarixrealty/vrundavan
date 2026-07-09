@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Inquiry, CustomRequirement, Property, Agent, MapLocation, AdminUser, PermissionSet, CRMLead, FAQ, MapSettings, SearchCategory, PropertyTypeCard, QuickFilter, SiteCMSConfig } from '../types';
+import { Inquiry, CustomRequirement, Property, Agent, MapLocation, AdminUser, PermissionSet, CRMLead, FAQ, MapSettings, SearchCategory, PropertyTypeCard, QuickFilter, SiteCMSConfig, HeroBanner, AdminTheme } from '../types';
 import { firebaseService, cleanPropertyPayload } from '../lib/firebaseService';
 import { auth } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -31,6 +31,11 @@ import SaaSRolePermissionsModule from './SaaSRolePermissionsModule';
 import SaaSEnquiryCenterModule from './SaaSEnquiryCenterModule';
 import SaaSMarketingModule from './SaaSMarketingModule';
 import SaaSAgentWorkspaceModule from './SaaSAgentWorkspaceModule';
+import SaaSThemeStudioModule from './SaaSThemeStudioModule';
+import HeroBannerManager from './cms/HeroBannerManager';
+import BlogManager from './cms/BlogManager';
+import CampaignManager from './cms/CampaignManager';
+import FreeServiceRequestsPanel from './cms/FreeServiceRequestsPanel';
 
 interface InquiryDashboardProps {
   inquiries: Inquiry[];
@@ -63,6 +68,7 @@ interface InquiryDashboardProps {
   onAddRequirement?: (data: Omit<CustomRequirement, 'id' | 'status' | 'date'>) => void;
   siteSettings?: SiteCMSConfig;
   setSiteSettings?: (newSettings: SiteCMSConfig) => void;
+  heroBanners?: HeroBanner[];
 }
 
 export default function InquiryDashboard({
@@ -95,8 +101,381 @@ export default function InquiryDashboard({
   quickFilters = [],
   setQuickFilters,
   siteSettings,
-  setSiteSettings
+  setSiteSettings,
+  heroBanners = []
 }: InquiryDashboardProps) {
+
+  // Collapsible sidebar state
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // Mobile drawer state
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  const DEFAULT_THEME: AdminTheme = {
+    themeId: 'royal_blue',
+    themeName: 'Royal Blue (Default)',
+    createdBy: 'System',
+    updatedAt: new Date().toISOString(),
+    sidebar: {
+      background: '#0b1f3a',
+      hover: '#1e2d4a',
+      active: '#1e3454',
+      border: '#1e2d4a',
+      shadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+      text: '#94a3b8',
+      activeText: '#ffffff',
+      icon: '#64748b',
+      activeIcon: '#C89B3C',
+      divider: '#1e2d4a',
+      badgeBg: '#1e2d4a',
+      badgeText: '#C89B3C',
+      accordionBg: '#0b1f3a',
+      accordionHover: '#1e2d4a',
+      accordionBorder: '#1e2d4a',
+    },
+    header: {
+      background: '#ffffff',
+      border: '#e2e8f0',
+      text: '#0f172a',
+      searchBg: '#f1f5f9',
+      notificationIcon: '#64748b',
+      profileIcon: '#3b82f6',
+      shadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    },
+    content: {
+      background: '#f8fafc',
+      pageBg: '#f8fafc',
+      cards: '#ffffff',
+      tables: '#ffffff',
+      forms: '#ffffff',
+      dialogs: '#ffffff',
+      popups: '#ffffff',
+      drawer: '#ffffff',
+    },
+    buttons: {
+      primaryBg: '#2563eb',
+      primaryText: '#ffffff',
+      secondaryBg: '#64748b',
+      secondaryText: '#ffffff',
+      successBg: '#16a34a',
+      successText: '#ffffff',
+      dangerBg: '#dc2626',
+      dangerText: '#ffffff',
+      warningBg: '#ca8a04',
+      warningText: '#ffffff',
+      infoBg: '#0891b2',
+      infoText: '#ffffff',
+      hoverOpacity: 85,
+      shadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      borderRadius: '0.375rem',
+    },
+    inputs: {
+      background: '#ffffff',
+      border: '#cbd5e1',
+      focusBorder: '#3b82f6',
+      placeholder: '#94a3b8',
+      checkbox: '#2563eb',
+      radio: '#2563eb',
+      switchBg: '#cbd5e1',
+      dropdown: '#ffffff',
+    },
+    typography: {
+      headingFont: 'Inter',
+      bodyFont: 'Inter',
+      sidebarFont: 'Inter',
+      menuWeight: '500',
+      headingWeight: '600',
+      buttonWeight: '500',
+      fontSize: '0.875rem',
+      letterSpacing: '0px',
+    },
+    icons: {
+      pack: 'Lucide',
+      size: '18px',
+      color: '#64748b',
+      activeColor: '#C89B3C',
+      hoverColor: '#1e293b',
+      rounded: true,
+      outlined: true,
+      filled: false,
+    },
+    borderRadius: {
+      global: '0.5rem',
+      cards: '0.5rem',
+      buttons: '0.375rem',
+      inputs: '0.375rem',
+      sidebar: '0.375rem',
+      dropdown: '0.375rem',
+      dialogs: '0.5rem',
+      sliders: '9999px',
+    },
+    shadowSettings: {
+      type: 'Soft',
+    },
+    layout: {
+      sidebarWidth: '280px',
+      expandedWidth: '280px',
+      miniWidth: '72px',
+      headerHeight: '64px',
+      contentWidth: 'Comfortable',
+      compactMode: false,
+      comfortableMode: true,
+      spaciousMode: false,
+    }
+  };
+
+  const [adminTheme, setAdminTheme] = useState<AdminTheme>(DEFAULT_THEME);
+
+  // Subscribe to Theme changes from Cloud Firestore
+  useEffect(() => {
+    const unsub = firebaseService.subscribeAdminTheme(
+      (theme) => {
+        if (theme) {
+          setAdminTheme(theme);
+        }
+      },
+      (err) => console.error("Theme Studio subscription failed:", err)
+    );
+    return unsub;
+  }, []);
+
+  // Ctrl+B sidebar toggle keyboard shortcut listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setIsSidebarCollapsed(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const dynamicStyles = useMemo(() => {
+    if (!adminTheme) return '';
+    const t = adminTheme;
+    return `
+      #enterprise-crm-workspace {
+        --font-heading: "${t.typography.headingFont}", "Inter", sans-serif;
+        --font-body: "${t.typography.bodyFont}", "Inter", sans-serif;
+        --font-sidebar: "${t.typography.sidebarFont}", "Inter", sans-serif;
+        
+        --weight-menu: ${t.typography.menuWeight};
+        --weight-heading: ${t.typography.headingWeight};
+        --weight-button: ${t.typography.buttonWeight};
+        
+        --font-size-base: ${t.typography.fontSize};
+        --letter-spacing-base: ${t.typography.letterSpacing};
+
+        --radius-global: ${t.borderRadius.global};
+        --radius-cards: ${t.borderRadius.cards};
+        --radius-buttons: ${t.borderRadius.buttons};
+        --radius-inputs: ${t.borderRadius.inputs};
+        --radius-sidebar: ${t.borderRadius.sidebar};
+        --radius-dropdown: ${t.borderRadius.dropdown};
+        --radius-dialogs: ${t.borderRadius.dialogs};
+        --radius-sliders: ${t.borderRadius.sliders};
+
+        --sidebar-bg: ${t.sidebar.background};
+        --sidebar-hover: ${t.sidebar.hover};
+        --sidebar-active: ${t.sidebar.active};
+        --sidebar-border: ${t.sidebar.border};
+        --sidebar-text: ${t.sidebar.text};
+        --sidebar-active-text: ${t.sidebar.activeText};
+        --sidebar-icon: ${t.sidebar.icon};
+        --sidebar-active-icon: ${t.sidebar.activeIcon};
+        --sidebar-divider: ${t.sidebar.divider};
+        --sidebar-badge-bg: ${t.sidebar.badgeBg};
+        --sidebar-badge-text: ${t.sidebar.badgeText};
+        --sidebar-accordion-bg: ${t.sidebar.accordionBg};
+        --sidebar-accordion-hover: ${t.sidebar.accordionHover};
+        --sidebar-accordion-border: ${t.sidebar.accordionBorder};
+
+        --header-bg: ${t.header.background};
+        --header-border: ${t.header.border};
+        --header-text: ${t.header.text};
+        --header-search-bg: ${t.header.searchBg};
+        --header-notification-icon: ${t.header.notificationIcon};
+        --header-profile-icon: ${t.header.profileIcon};
+        --header-shadow: ${t.header.shadow};
+
+        --content-bg: ${t.content.background};
+        --content-page-bg: ${t.content.pageBg};
+        --content-cards: ${t.content.cards};
+        --content-tables: ${t.content.tables};
+        --content-forms: ${t.content.forms};
+        --content-dialogs: ${t.content.dialogs};
+        --content-popups: ${t.content.popups};
+        --content-drawer: ${t.content.drawer};
+
+        --btn-primary-bg: ${t.buttons.primaryBg};
+        --btn-primary-text: ${t.buttons.primaryText};
+        --btn-secondary-bg: ${t.buttons.secondaryBg};
+        --btn-secondary-text: ${t.buttons.secondaryText};
+        --btn-success-bg: ${t.buttons.successBg};
+        --btn-success-text: ${t.buttons.successText};
+        --btn-danger-bg: ${t.buttons.dangerBg};
+        --btn-danger-text: ${t.buttons.dangerText};
+        --btn-warning-bg: ${t.buttons.warningBg};
+        --btn-warning-text: ${t.buttons.warningText};
+        --btn-info-bg: ${t.buttons.infoBg};
+        --btn-info-text: ${t.buttons.infoText};
+        --btn-hover-opacity: ${t.buttons.hoverOpacity / 100};
+        --btn-shadow: ${t.buttons.shadow};
+
+        --input-bg: ${t.inputs.background};
+        --input-border: ${t.inputs.border};
+        --input-focus-border: ${t.inputs.focusBorder};
+        --input-placeholder: ${t.inputs.placeholder};
+        --input-checkbox: ${t.inputs.checkbox};
+        --input-radio: ${t.inputs.radio};
+        --input-switch-bg: ${t.inputs.switchBg};
+        --input-dropdown: ${t.inputs.dropdown};
+      }
+
+      /* Base Style Overrides */
+      #enterprise-crm-workspace, 
+      #enterprise-crm-workspace button, 
+      #enterprise-crm-workspace input, 
+      #enterprise-crm-workspace select, 
+      #enterprise-crm-workspace textarea {
+        font-family: var(--font-body) !important;
+        font-size: var(--font-size-base) !important;
+        letter-spacing: var(--letter-spacing-base) !important;
+      }
+
+      #enterprise-crm-workspace h1, 
+      #enterprise-crm-workspace h2, 
+      #enterprise-crm-workspace h3, 
+      #enterprise-crm-workspace h4, 
+      #enterprise-crm-workspace h5, 
+      #enterprise-crm-workspace h6 {
+        font-family: var(--font-heading) !important;
+        font-weight: var(--weight-heading) !important;
+      }
+
+      /* Sidebar structure overrides */
+      #enterprise-crm-workspace aside {
+        background-color: var(--sidebar-bg) !important;
+        color: var(--sidebar-text) !important;
+        border-right-color: var(--sidebar-border) !important;
+        font-family: var(--font-sidebar) !important;
+        width: ${isSidebarCollapsed ? t.layout.miniWidth : t.layout.expandedWidth} !important;
+        transition: width 250ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+      }
+
+      #enterprise-crm-workspace aside .border-b,
+      #enterprise-crm-workspace aside .border-t {
+        border-color: var(--sidebar-divider) !important;
+      }
+
+      #enterprise-crm-workspace aside nav button {
+        color: var(--sidebar-text) !important;
+        font-weight: var(--weight-menu) !important;
+      }
+
+      #enterprise-crm-workspace aside nav button:hover {
+        background-color: var(--sidebar-hover) !important;
+        color: var(--sidebar-active-text) !important;
+      }
+
+      /* Submenu Accordion Container */
+      #enterprise-crm-workspace aside .overflow-hidden {
+        background-color: var(--sidebar-accordion-bg) !important;
+        border-left-color: var(--sidebar-accordion-border) !important;
+      }
+
+      /* Header overrides */
+      #enterprise-crm-workspace header {
+        background-color: var(--header-bg) !important;
+        color: var(--header-text) !important;
+        border-bottom-color: var(--header-border) !important;
+        height: var(--header-height) !important;
+        box-shadow: var(--header-shadow) !important;
+      }
+
+      #enterprise-crm-workspace header input {
+        background-color: var(--header-search-bg) !important;
+        color: var(--header-text) !important;
+      }
+
+      /* Main canvas overrides */
+      #enterprise-crm-workspace main {
+        background-color: var(--content-bg) !important;
+      }
+
+      #enterprise-crm-workspace .bg-slate-50 {
+        background-color: var(--content-page-bg) !important;
+      }
+
+      #enterprise-crm-workspace .bg-white {
+        background-color: var(--content-cards) !important;
+        border-radius: var(--radius-cards) !important;
+      }
+
+      #enterprise-crm-workspace table {
+        background-color: var(--content-tables) !important;
+      }
+
+      #enterprise-crm-workspace table th {
+        background-color: var(--content-tables) !important;
+      }
+
+      /* Action Buttons overrides */
+      #enterprise-crm-workspace button.bg-blue-600 {
+        background-color: var(--btn-primary-bg) !important;
+        color: var(--btn-primary-text) !important;
+        font-weight: var(--weight-button) !important;
+        border-radius: var(--radius-buttons) !important;
+        box-shadow: var(--btn-shadow) !important;
+      }
+      #enterprise-crm-workspace button.bg-blue-600:hover {
+        opacity: var(--btn-hover-opacity) !important;
+      }
+
+      #enterprise-crm-workspace button.bg-slate-100 {
+        background-color: var(--btn-secondary-bg) !important;
+        color: var(--btn-secondary-text) !important;
+        border-radius: var(--radius-buttons) !important;
+      }
+      #enterprise-crm-workspace button.bg-slate-100:hover {
+        opacity: var(--btn-hover-opacity) !important;
+      }
+
+      #enterprise-crm-workspace button.bg-green-600,
+      #enterprise-crm-workspace button.bg-emerald-600 {
+        background-color: var(--btn-success-bg) !important;
+        color: var(--btn-success-text) !important;
+        border-radius: var(--radius-buttons) !important;
+      }
+
+      #enterprise-crm-workspace button.bg-red-600,
+      #enterprise-crm-workspace button.bg-rose-600 {
+        background-color: var(--btn-danger-bg) !important;
+        color: var(--btn-danger-text) !important;
+        border-radius: var(--radius-buttons) !important;
+      }
+
+      /* Inputs style */
+      #enterprise-crm-workspace input[type="text"],
+      #enterprise-crm-workspace input[type="email"],
+      #enterprise-crm-workspace input[type="password"],
+      #enterprise-crm-workspace select,
+      #enterprise-crm-workspace textarea {
+        background-color: var(--input-bg) !important;
+        border-color: var(--input-border) !important;
+        border-radius: var(--radius-inputs) !important;
+      }
+
+      #enterprise-crm-workspace input[type="text"]:focus,
+      #enterprise-crm-workspace input[type="email"]:focus,
+      #enterprise-crm-workspace input[type="password"]:focus,
+      #enterprise-crm-workspace select:focus,
+      #enterprise-crm-workspace textarea:focus {
+        border-color: var(--input-focus-border) !important;
+      }
+    `;
+  }, [adminTheme, isSidebarCollapsed]);
   
   // Login Forms states
   const [emailInput, setEmailInput] = useState('');
@@ -117,11 +496,16 @@ export default function InquiryDashboard({
     }
   }, [loggedInUser]);
 
-  // Collapsible sidebar state
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // Parent Category active sidebar state with localStorage persistence
+  const [activeParent, setActiveParent] = useState<string>(() => {
+    const saved = localStorage.getItem('dvarix_active_parent');
+    return saved || 'Dashboard';
+  });
 
-  // Parent Category active sidebar state 
-  const [activeParent, setActiveParent] = useState<string>('Dashboard');
+  // Keep localStorage in sync when activeParent changes
+  useEffect(() => {
+    localStorage.setItem('dvarix_active_parent', activeParent);
+  }, [activeParent]);
 
   // Subtabs within inline panels
   const [siteVisitsTab, setSiteVisitsTab] = useState<'Upcoming' | 'Completed' | 'All Site Visits'>('Upcoming');
@@ -158,7 +542,270 @@ export default function InquiryDashboard({
   const [newQFFilterName, setNewQFFilterName] = useState('');
 
   // --- Website CMS Customize State Variables ---
-  const [cmsActiveTab, setCmsActiveTab] = useState<'General' | 'Hero' | 'Services' | 'Campaigns' | 'Testimonials' | 'Blogs'>('General');
+  const [cmsActiveTab, setCmsActiveTab] = useState<'General' | 'Hero' | 'Luxury Banners' | 'Services' | 'Campaigns' | 'Testimonials' | 'Blogs' | 'Statistics' | 'Footer'>('General');
+
+  // Child-to-parent mapping for auto-expand logic
+  const CHILD_TO_PARENT_MAP = useMemo(() => ({
+    // CRM & SALES
+    "Enquiry Center": "CRM & SALES",
+    "Free Service Requests": "CRM & SALES",
+    "Lead Management": "CRM & SALES",
+    "My Leads": "CRM & SALES",
+    "Requirements CRM": "CRM & SALES",
+    "Customers": "CRM & SALES",
+    "My Customers": "CRM & SALES",
+
+    // PROPERTY MANAGEMENT
+    "Properties": "PROPERTY MANAGEMENT",
+    "Search Categories": "PROPERTY MANAGEMENT",
+    "Property Type Cards": "PROPERTY MANAGEMENT",
+    "Site Visits": "PROPERTY MANAGEMENT",
+    "Location Management": "PROPERTY MANAGEMENT",
+    "Map Style Management": "PROPERTY MANAGEMENT",
+
+    // TEAM MANAGEMENT
+    "Agent Workspace": "TEAM MANAGEMENT",
+    "Agents & Team": "TEAM MANAGEMENT",
+    "Tasks & Operations": "TEAM MANAGEMENT",
+    "My Tasks": "TEAM MANAGEMENT",
+    "My Follow-ups": "TEAM MANAGEMENT",
+    "Documents": "TEAM MANAGEMENT",
+    "Finance": "TEAM MANAGEMENT",
+    "Calendar": "TEAM MANAGEMENT",
+    "My Profile": "TEAM MANAGEMENT",
+
+    // WEBSITE CMS
+    "Hero Banner Management": "WEBSITE CMS",
+    "Homepage CMS": "WEBSITE CMS",
+    "FAQ Management": "WEBSITE CMS",
+    "Marketing": "WEBSITE CMS",
+    "Website CMS Customize": "WEBSITE CMS",
+
+    // AI & AUTOMATION
+    "AI Center": "AI & AUTOMATION",
+    "Dvarix Bot Studio": "AI & AUTOMATION",
+    "Notifications Center": "AI & AUTOMATION",
+    "Notifications": "AI & AUTOMATION",
+
+    // REPORTS
+    "Reports & Analytics": "REPORTS",
+
+    // ADMINISTRATION
+    "Role & Permissions": "ADMINISTRATION",
+    "System Configuration": "ADMINISTRATION"
+  }) as Record<string, string>, []);
+
+  // Parent Category expanded state with localStorage persistence
+  const [expandedParent, setExpandedParent] = useState<string | null>(() => {
+    const saved = localStorage.getItem('dvarix_expanded_parent');
+    if (saved) return saved;
+    // Fallback to activeParent's mapped parent on load
+    return CHILD_TO_PARENT_MAP[activeParent] || null;
+  });
+
+  // Auto-expand current active parent section when activeParent or cmsActiveTab changes
+  useEffect(() => {
+    let childKey: string = activeParent;
+    if (activeParent === 'Website CMS Customize') {
+      if (cmsActiveTab === 'Luxury Banners') {
+        childKey = 'Hero Banner Management';
+      } else if (cmsActiveTab === 'Hero') {
+        childKey = 'Homepage CMS';
+      }
+    }
+    const mappedParent = CHILD_TO_PARENT_MAP[childKey];
+    if (mappedParent) {
+      setExpandedParent(mappedParent);
+      localStorage.setItem('dvarix_expanded_parent', mappedParent);
+    }
+  }, [activeParent, cmsActiveTab, CHILD_TO_PARENT_MAP]);
+
+
+  
+  // --- Statistics Management States ---
+  const [editingStatId, setEditingStatId] = useState<string | null>(null);
+  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
+  const [statIcon, setStatIcon] = useState('🏠');
+  const [statNumber, setStatNumber] = useState('');
+  const [statTitle, setStatTitle] = useState('');
+  const [statDescription, setStatDescription] = useState('');
+  const [statEnabled, setStatEnabled] = useState(true);
+  const [statOrder, setStatOrder] = useState<number>(1);
+
+  // Statistics settings inputs
+  const [statAnimDuration, setStatAnimDuration] = useState<number>(2.0);
+  const [statAnimDelay, setStatAnimDelay] = useState<number>(150);
+
+  // Sync Statistics settings from prop when siteSettings updates
+  useEffect(() => {
+    if (siteSettings?.statisticsSettings) {
+      setStatAnimDuration(siteSettings.statisticsSettings.animationDuration || 2.0);
+      setStatAnimDelay(siteSettings.statisticsSettings.animationDelay || 150);
+    }
+  }, [siteSettings?.statisticsSettings]);
+
+  // --- Footer Management States ---
+  const [footerLogoText, setFooterLogoText] = useState('DVARIX REALTY');
+  const [footerBrandDescription, setFooterBrandDescription] = useState('');
+  const [footerAddress, setFooterAddress] = useState('');
+  const [footerPhone, setFooterPhone] = useState('');
+  const [footerEmail, setFooterEmail] = useState('');
+  const [footerCopyrightText, setFooterCopyrightText] = useState('');
+  const [footerReraBadgeText, setFooterReraBadgeText] = useState('');
+  const [footerReraSubtext, setFooterReraSubtext] = useState('');
+  const [footerEnableSkyline, setFooterEnableSkyline] = useState(true);
+  const [footerEnableTrustStrip, setFooterEnableTrustStrip] = useState(true);
+  const [footerShowSocialIcons, setFooterShowSocialIcons] = useState(true);
+  const [footerSectionOrder, setFooterSectionOrder] = useState<string[]>(["brand", "company", "services", "contact"]);
+  const [footerBusinessHours, setFooterBusinessHours] = useState('');
+  const [footerWhatsappNumber, setFooterWhatsappNumber] = useState('');
+  const [footerGoogleMapsUrl, setFooterGoogleMapsUrl] = useState('');
+  
+  const [footerCtas, setFooterCtas] = useState<any[]>([]);
+  const [footerCompanyLinks, setFooterCompanyLinks] = useState<any[]>([]);
+  const [footerServicesLinks, setFooterServicesLinks] = useState<any[]>([]);
+  const [footerQuickLinks, setFooterQuickLinks] = useState<any[]>([]);
+  const [footerSocials, setFooterSocials] = useState<any[]>([]);
+  const [footerTrustCards, setFooterTrustCards] = useState<any[]>([]);
+
+  // Synchronize Footer state variables when siteSettings loads
+  useEffect(() => {
+    if (siteSettings?.footerConfig) {
+      const fc = siteSettings.footerConfig;
+      setFooterLogoText(fc.logoText || 'DVARIX REALTY');
+      setFooterBrandDescription(fc.brandDescription || '');
+      setFooterAddress(fc.address || '');
+      setFooterPhone(fc.phone || '');
+      setFooterEmail(fc.email || '');
+      setFooterCopyrightText(fc.copyrightText || '');
+      setFooterReraBadgeText(fc.reraBadgeText || '');
+      setFooterReraSubtext(fc.reraSubtext || '');
+      setFooterEnableSkyline(fc.enableSkyline !== false);
+      setFooterEnableTrustStrip(fc.enableTrustStrip !== false);
+      setFooterShowSocialIcons(fc.showSocialIcons !== false);
+      setFooterSectionOrder((fc.sectionOrder || ["brand", "company", "services", "contact"]).filter((s: string) => s !== 'quickLinks'));
+      setFooterBusinessHours(fc.businessHours || 'Mon - Sat: 9:00 AM - 7:00 PM, Sunday: Closed');
+      setFooterWhatsappNumber(fc.whatsappNumber || '+91 63009 84846');
+      setFooterGoogleMapsUrl(fc.googleMapsUrl || 'https://maps.google.com/?q=Dvarix+Realty+JP+Nagar+Bengaluru');
+      setFooterCtas(fc.ctas || []);
+      setFooterCompanyLinks(fc.companyLinks || []);
+      setFooterServicesLinks(fc.servicesLinks || []);
+      setFooterQuickLinks(fc.quickLinks || []);
+      setFooterSocials(fc.socials || []);
+      setFooterTrustCards(fc.trustCards || []);
+    } else {
+      // Set to standard defaults
+      setFooterLogoText('DVARIX REALTY');
+      setFooterBrandDescription('Helping you buy, sell, and invest in verified residential and commercial properties across Bengaluru with complete transparency.');
+      setFooterAddress('JP Nagar, Bengaluru, Karnataka 560078');
+      setFooterPhone('+91 63009 84846');
+      setFooterEmail('dvarixrealty@gmail.com');
+      setFooterCopyrightText('Dvarix Realty. All Rights Reserved.');
+      setFooterReraBadgeText('RERA Registered');
+      setFooterReraSubtext('Real Estate Advisory Services');
+      setFooterEnableSkyline(true);
+      setFooterEnableTrustStrip(true);
+      setFooterShowSocialIcons(true);
+      setFooterSectionOrder(["brand", "company", "services", "contact"]);
+      setFooterBusinessHours('Mon - Sat: 9:00 AM - 7:00 PM, Sunday: Closed');
+      setFooterWhatsappNumber('+91 63009 84846');
+      setFooterGoogleMapsUrl('https://maps.google.com/?q=Dvarix+Realty+JP+Nagar+Bengaluru');
+      setFooterCtas([
+        { text: "Explore Properties", type: "tab", target: "Properties", icon: "Explore" },
+        { text: "Contact Advisor", type: "tab", target: "Contact", icon: "Advisor" }
+      ]);
+      setFooterCompanyLinks([
+        { label: "Home", url: "Home" },
+        { label: "Properties", url: "Properties" },
+        { label: "About Us", url: "About" },
+        { label: "Contact Us", url: "Contact" },
+        { label: "Custom Property Request", url: "CustomRequest" }
+      ]);
+      setFooterServicesLinks([
+        { label: "Residential Properties", url: "Properties" },
+        { label: "Commercial Properties", url: "Properties" },
+        { label: "Plots & Land", url: "Properties" },
+        { label: "Luxury Villas", url: "Properties" },
+        { label: "Investment Advisory", url: "Properties" }
+      ]);
+      setFooterQuickLinks([
+        { label: "Privacy Policy", url: "Privacy" },
+        { label: "Terms & Conditions", url: "Terms" },
+        { label: "RERA Compliance", url: "Rera" },
+        { label: "FAQs", url: "Faqs" },
+        { label: "Sitemap", url: "Sitemap" }
+      ]);
+      setFooterSocials([
+        { platform: "instagram", url: "https://instagram.com/dvarixrealty", enabled: true },
+        { platform: "facebook", url: "https://facebook.com/dvarixrealty", enabled: true },
+        { platform: "linkedin", url: "https://linkedin.com/company/dvarixrealty", enabled: true },
+        { platform: "youtube", url: "https://youtube.com/c/dvarixrealty", enabled: true }
+      ]);
+      setFooterTrustCards([
+        { id: "tc_1", title: "Verified Listings", description: "100% Verified Properties", icon: "ShieldCheck" },
+        { id: "tc_2", title: "Legal Assistance", description: "Property Documentation Support", icon: "FileText" },
+        { id: "tc_3", title: "RERA Guidance", description: "Professional Compliance Assistance", icon: "CheckCircle" },
+        { id: "tc_4", title: "Transparent Process", description: "End-to-End Property Advisory", icon: "Compass" }
+      ]);
+    }
+  }, [siteSettings?.footerConfig]);
+  
+  // New Banner Form States
+  const [editingBannerId, setEditingBannerId] = useState<string | null>(null);
+  const [bannerHeadline, setBannerHeadline] = useState('');
+  const [bannerSubheading, setBannerSubheading] = useState('');
+  const [bannerDescription, setBannerDescription] = useState('');
+  const [bannerBadgeText, setBannerBadgeText] = useState('DVARIX REALTY');
+  const [bannerPropertyCountBadge, setBannerPropertyCountBadge] = useState('500+ Verified Properties');
+  const [bannerDesktopImage, setBannerDesktopImage] = useState('');
+  const [bannerTabletImage, setBannerTabletImage] = useState('');
+  const [bannerMobileImage, setBannerMobileImage] = useState('');
+  const [bannerPrimaryButtonText, setBannerPrimaryButtonText] = useState('Explore Properties');
+  const [bannerPrimaryButtonUrl, setBannerPrimaryButtonUrl] = useState('#listings-layout-view');
+  const [bannerSecondaryButtonText, setBannerSecondaryButtonText] = useState('Custom Request');
+  const [bannerSecondaryButtonUrl, setBannerSecondaryButtonUrl] = useState('custom-request');
+  const [bannerEnabled, setBannerEnabled] = useState(true);
+  const [bannerOrder, setBannerOrder] = useState(1);
+  const [bannerPublishDate, setBannerPublishDate] = useState('');
+  const [bannerExpiryDate, setBannerExpiryDate] = useState('');
+  const [bannerPreviewObject, setBannerPreviewObject] = useState<any | null>(null);
+
+  // --- Advanced Hero Banner Management states ---
+  const [bannerDesktopImageMethod, setBannerDesktopImageMethod] = useState<'upload' | 'url'>('url');
+  const [bannerMobileImageMethod, setBannerMobileImageMethod] = useState<'upload' | 'url'>('url');
+  const [bannerStatus, setBannerStatus] = useState<'active' | 'inactive' | 'draft'>('active');
+
+  const [primaryBtnText, setPrimaryBtnText] = useState('Explore Properties');
+  const [primaryBtnDestType, setPrimaryBtnDestType] = useState<'internal' | 'external' | 'custom' | 'category' | 'property' | 'contact' | 'custom-request'>('internal');
+  const [primaryBtnDestVal, setPrimaryBtnDestVal] = useState('Properties');
+  const [primaryBtnNewTab, setPrimaryBtnNewTab] = useState(false);
+
+  const [secondaryBtnText, setSecondaryBtnText] = useState('Custom Request');
+  const [secondaryBtnDestType, setSecondaryBtnDestType] = useState<'internal' | 'external' | 'custom' | 'category' | 'property' | 'contact' | 'custom-request'>('custom-request');
+  const [secondaryBtnDestVal, setSecondaryBtnDestVal] = useState('');
+  const [secondaryBtnNewTab, setSecondaryBtnNewTab] = useState(false);
+
+  // Carousel Settings fields
+  const [carouselAutoPlay, setCarouselAutoPlay] = useState(true);
+  const [carouselDuration, setCarouselDuration] = useState<number>(5);
+  const [carouselSpeed, setCarouselSpeed] = useState<'fast' | 'normal' | 'slow'>('normal');
+  const [carouselArrows, setCarouselArrows] = useState(true);
+  const [carouselDots, setCarouselDots] = useState(true);
+  const [carouselPause, setCarouselPause] = useState(true);
+  const [carouselLoop, setCarouselLoop] = useState(true);
+
+  // Sync carousel settings from prop when siteSettings updates
+  useEffect(() => {
+    if (siteSettings?.carouselSettings) {
+      setCarouselAutoPlay(siteSettings.carouselSettings.autoPlay);
+      setCarouselDuration(siteSettings.carouselSettings.autoSlideDuration || 5);
+      setCarouselSpeed(siteSettings.carouselSettings.transitionSpeed || 'normal');
+      setCarouselArrows(siteSettings.carouselSettings.showNavigationArrows !== false);
+      setCarouselDots(siteSettings.carouselSettings.showPaginationDots !== false);
+      setCarouselPause(siteSettings.carouselSettings.pauseOnHover !== false);
+      setCarouselLoop(siteSettings.carouselSettings.infiniteLoop !== false);
+    }
+  }, [siteSettings?.carouselSettings]);
   
   // New Service Form
   const [newServiceTitle, setNewServiceTitle] = useState('');
@@ -913,6 +1560,7 @@ export default function InquiryDashboard({
       const updatedProp: Property = {
         ...existingProp,
         ...data,
+        images: data.images || (data.image ? [data.image, ...(data.galleryImages || [])] : (existingProp.images || [])),
         amenities: typeof data.amenitiesStr === 'string' ? data.amenitiesStr.split(',').map((tag: any) => tag.trim()).filter(Boolean) : (existingProp.amenities || []),
         agent: matchedAgentObj,
         updatedAt: new Date().toISOString()
@@ -933,7 +1581,7 @@ export default function InquiryDashboard({
       const newProp: Property = {
         rating: 5.0,
         reviews: 1,
-        images: data.images || (data.image ? [data.image] : ['https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=800&q=80']),
+        images: data.images || (data.image ? [data.image, ...(data.galleryImages || [])] : ['https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=800&q=80']),
         createdAt: new Date().toISOString(),
         ...data,
         status: data.status || 'Published',
@@ -1114,6 +1762,7 @@ AI STRATEGY PROPOSAL:
         { key: "Dashboard", icon: BarChart2 },
         { key: "Agent Workspace", icon: Award },
         { key: "Enquiry Center", icon: Inbox },
+        { key: "Free Service Requests", icon: FileText },
         { key: "Lead Management", icon: Users },
         { key: "Requirements CRM", icon: Layers },
         { key: "Customers", icon: Users },
@@ -1134,6 +1783,7 @@ AI STRATEGY PROPOSAL:
         { key: "Dvarix Bot Studio", icon: MessageSquare },
         { key: "Notifications Center", icon: Bell },
         { key: "Role & Permissions", icon: ShieldCheck },
+        { key: "Theme Studio", icon: Palette },
         { key: "Website CMS Customize", icon: Palette },
         { key: "System Configuration", icon: Settings }
       ] as const;
@@ -1144,6 +1794,7 @@ AI STRATEGY PROPOSAL:
         { key: "Dashboard", icon: BarChart2 },
         { key: "Agent Workspace", icon: Award },
         { key: "Enquiry Center", icon: Inbox },
+        { key: "Free Service Requests", icon: FileText },
         { key: "Lead Management", icon: Users },
         { key: "Requirements CRM", icon: Layers },
         { key: "Customers", icon: Users },
@@ -1153,7 +1804,8 @@ AI STRATEGY PROPOSAL:
         { key: "Tasks & Operations", icon: CheckSquare },
         { key: "Documents", icon: FileText },
         { key: "Reports & Analytics", icon: Coins },
-        { key: "Notifications Center", icon: Bell }
+        { key: "Notifications Center", icon: Bell },
+        { key: "Theme Studio", icon: Palette }
       ] as const;
     }
 
@@ -1176,6 +1828,205 @@ AI STRATEGY PROPOSAL:
   const isAuthorized = useMemo(() => {
     return MenuItems.some(item => item.key === activeParent);
   }, [MenuItems, activeParent]);
+
+  // Helper to resolve Lucide Icon components
+  const resolveIcon = (name: string) => {
+    const IconComponent = (LucideIcons as any)[name];
+    if (IconComponent) return IconComponent;
+    if (name === "LayoutDashboard") return LucideIcons.BarChart2;
+    if (name === "BarChart3") return LucideIcons.BarChart2;
+    if (name === "MonitorSmartphone") return LucideIcons.Palette;
+    if (name === "Bot") return LucideIcons.Compass;
+    if (name === "Briefcase") return LucideIcons.ShieldCheck;
+    return LucideIcons.HelpCircle;
+  };
+
+  // Storing sidebar category structure
+  const sidebarStructure = useMemo(() => {
+    const availableKeys = new Set(MenuItems.map(m => m.key));
+    const categories: Array<{
+      key: string;
+      label: string;
+      iconName: string;
+      isExpandable: boolean;
+      children: Array<{ key: string; label: string; iconName: string }>;
+    }> = [];
+
+    const rawCategories = [
+      {
+        key: "CRM & SALES",
+        label: "CRM & Sales",
+        iconName: "Users",
+        isExpandable: true,
+        children: [
+          { key: "Enquiry Center", label: "Enquiry Center", iconName: "Inbox" },
+          { key: "Free Service Requests", label: "Free Service Requests", iconName: "FileText" },
+          { key: "Lead Management", label: "Lead Management", iconName: "Users" },
+          { key: "My Leads", label: "My Leads", iconName: "Inbox" },
+          { key: "Requirements CRM", label: "Requirements CRM", iconName: "Layers" },
+          { key: "Customers", label: "Customers", iconName: "Users" },
+          { key: "My Customers", label: "My Customers", iconName: "Users" }
+        ]
+      },
+      {
+        key: "PROPERTY MANAGEMENT",
+        label: "Property Management",
+        iconName: "Building2",
+        isExpandable: true,
+        children: [
+          { key: "Properties", label: "Properties", iconName: "Building2" },
+          { key: "Search Categories", label: "Search Categories", iconName: "Tag" },
+          { key: "Property Type Cards", label: "Property Type Cards", iconName: "Grid" },
+          { key: "Site Visits", label: "Site Visits", iconName: "Calendar" },
+          { key: "Location Management", label: "Location Management", iconName: "MapPin" },
+          { key: "Map Style Management", label: "Map Style Management", iconName: "Palette" }
+        ]
+      },
+      {
+        key: "TEAM MANAGEMENT",
+        label: "Team Management",
+        iconName: "Briefcase",
+        isExpandable: true,
+        children: [
+          { key: "Agent Workspace", label: "Agent Workspace", iconName: "Award" },
+          { key: "Agents & Team", label: "Agents & Team", iconName: "ShieldCheck" },
+          { key: "Tasks & Operations", label: "Tasks & Operations", iconName: "CheckSquare" },
+          { key: "My Tasks", label: "My Tasks", iconName: "CheckSquare" },
+          { key: "My Follow-ups", label: "My Follow-ups", iconName: "Clock" },
+          { key: "Documents", label: "Documents", iconName: "FileText" },
+          { key: "Finance", label: "Finance", iconName: "DollarSign" },
+          { key: "Calendar", label: "Calendar", iconName: "Calendar" },
+          { key: "My Profile", label: "My Profile", iconName: "User" }
+        ]
+      },
+      {
+        key: "WEBSITE CMS",
+        label: "Website CMS",
+        iconName: "MonitorSmartphone",
+        isExpandable: true,
+        children: [
+          { key: "Hero Banner Management", label: "Hero Banner Management", iconName: "Image" },
+          { key: "Homepage CMS", label: "Homepage CMS", iconName: "Home" },
+          { key: "FAQ Management", label: "FAQ Management", iconName: "HelpCircle" },
+          { key: "Marketing", label: "Marketing", iconName: "TrendingUp" },
+          { key: "Website CMS Customize", label: "Website CMS Customize", iconName: "Palette" }
+        ]
+      },
+      {
+        key: "AI & AUTOMATION",
+        label: "AI & Automation",
+        iconName: "Bot",
+        isExpandable: true,
+        children: [
+          { key: "AI Center", label: "AI Center", iconName: "Compass" },
+          { key: "Dvarix Bot Studio", label: "Dvarix Bot Studio", iconName: "MessageSquare" },
+          { key: "Notifications Center", label: "Notifications Center", iconName: "Bell" },
+          { key: "Notifications", label: "Notifications", iconName: "Bell" }
+        ]
+      },
+      {
+        key: "REPORTS",
+        label: "Reports",
+        iconName: "BarChart3",
+        isExpandable: true,
+        children: [
+          { key: "Reports & Analytics", label: "Reports & Analytics", iconName: "Coins" }
+        ]
+      },
+      {
+        key: "ADMINISTRATION",
+        label: "Administration",
+        iconName: "Settings",
+        isExpandable: true,
+        children: [
+          { key: "Role & Permissions", label: "Role & Permissions", iconName: "ShieldCheck" },
+          { key: "Theme Studio", label: "Theme Studio", iconName: "Palette" },
+          { key: "System Configuration", label: "System Configuration", iconName: "Settings" }
+        ]
+      }
+    ];
+
+    for (const cat of rawCategories) {
+      const filteredChildren = cat.children.filter(child => {
+        if (child.key === "Hero Banner Management" || child.key === "Homepage CMS") {
+          return availableKeys.has("Website CMS Customize");
+        }
+        return availableKeys.has(child.key);
+      });
+
+      if (filteredChildren.length > 0) {
+        categories.push({
+          key: cat.key,
+          label: cat.label,
+          iconName: cat.iconName,
+          isExpandable: cat.isExpandable,
+          children: filteredChildren
+        });
+      }
+    }
+
+    return categories;
+  }, [MenuItems]);
+
+  const handleChildClick = (childKey: string) => {
+    if (childKey === 'Hero Banner Management') {
+      setActiveParent('Website CMS Customize');
+      setCmsActiveTab('Luxury Banners');
+    } else if (childKey === 'Homepage CMS') {
+      setActiveParent('Website CMS Customize');
+      setCmsActiveTab('Hero');
+    } else {
+      setActiveParent(childKey);
+    }
+    setIsMobileOpen(false);
+  };
+
+  const isChildActive = (childKey: string) => {
+    if (childKey === 'Hero Banner Management') {
+      return activeParent === 'Website CMS Customize' && cmsActiveTab === 'Luxury Banners';
+    }
+    if (childKey === 'Homepage CMS') {
+      return activeParent === 'Website CMS Customize' && cmsActiveTab === 'Hero';
+    }
+    if (childKey === 'Website CMS Customize') {
+      return activeParent === 'Website CMS Customize' && cmsActiveTab !== 'Luxury Banners' && cmsActiveTab !== 'Hero';
+    }
+    return activeParent === childKey;
+  };
+
+  const isParentActive = (cat: typeof sidebarStructure[0]) => {
+    if (!cat.isExpandable) {
+      return activeParent === cat.key;
+    }
+    return cat.children.some(child => isChildActive(child.key));
+  };
+
+  const handleParentToggle = (parentKey: string) => {
+    if (expandedParent === parentKey) {
+      setExpandedParent(null);
+      localStorage.removeItem('dvarix_expanded_parent');
+    } else {
+      setExpandedParent(parentKey);
+      localStorage.setItem('dvarix_expanded_parent', parentKey);
+    }
+  };
+
+  const handleParentClick = (cat: typeof sidebarStructure[0]) => {
+    if (!cat.isExpandable) {
+      setActiveParent(cat.key);
+      setExpandedParent(null);
+      localStorage.removeItem('dvarix_expanded_parent');
+      setIsMobileOpen(false);
+    } else {
+      if (isSidebarCollapsed) {
+        setIsSidebarCollapsed(false);
+        setExpandedParent(cat.key);
+        localStorage.setItem('dvarix_expanded_parent', cat.key);
+      } else {
+        handleParentToggle(cat.key);
+      }
+    }
+  };
 
   // Render Login state if needed
   if (!isAuthenticated) {
@@ -1254,68 +2105,190 @@ AI STRATEGY PROPOSAL:
 
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans" id="enterprise-crm-workspace">
+      <style>{dynamicStyles}</style>
       
-      {/* 1. COLLAPSIBLE LHS SIDEBAR */}
+      {/* 0. MOBILE BACKDROP OVERLAY */}
+      <AnimatePresence>
+        {isMobileOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsMobileOpen(false)}
+            className="fixed inset-0 bg-[#0B1F3A]/60 z-45 lg:hidden backdrop-blur-xs"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* 1. REDESIGNED LUXURY ENTERPRISE SIDEBAR */}
       <aside 
-        className={`bg-white border-r border-slate-200 flex flex-col justify-between shrink-0 transition-all duration-300 ${
-          isSidebarCollapsed ? 'w-16' : 'w-64'
-        }`}
+        className={`bg-[#0B1F3A] text-slate-100 flex flex-col justify-between shrink-0 transition-all duration-300 border-r border-[#1e2d4a]/40 shadow-2xl z-50
+          lg:static lg:translate-x-0 lg:flex
+          fixed inset-y-0 left-0 transform ${
+            isMobileOpen ? 'translate-x-0' : '-translate-x-full'
+          } ${
+            isSidebarCollapsed ? 'lg:w-16' : 'lg:w-64'
+          } w-64 lg:h-auto h-screen`}
       >
         <div>
           {/* Corporate brand stamp */}
-          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="p-4 border-b border-[#1e2d4a]/60 flex items-center justify-between">
             {!isSidebarCollapsed && (
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-extrabold font-mono shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#C89B3C] to-[#a3792b] flex items-center justify-center text-[#0B1F3A] font-extrabold font-mono shadow-md border border-[#C89B3C]/30">
                   DR
                 </div>
                 <div>
-                  <span className="font-extrabold text-[12px] text-slate-900 tracking-tight block">DVARIX REALTY</span>
-                  <span className="text-[9px] uppercase tracking-wider text-blue-600 font-bold block">Enterprise CRM</span>
+                  <span className="font-extrabold text-[12px] text-white tracking-tight block">DVARIX REALTY</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#C89B3C] font-semibold block">Enterprise ERP</span>
                 </div>
               </div>
             )}
             
             {isSidebarCollapsed && (
-              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold mx-auto">
-                D
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#C89B3C] to-[#a3792b] flex items-center justify-center text-[#0B1F3A] font-bold mx-auto shadow-md border border-[#C89B3C]/30">
+                DR
               </div>
             )}
+
+            {/* Mobile close button inside sidebar drawer */}
+            <button
+              onClick={() => setIsMobileOpen(false)}
+              className="lg:hidden p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer transition"
+            >
+              <LucideIcons.X className="h-5 w-5" />
+            </button>
           </div>
 
           {/* Menus catalog items */}
-          <nav className="p-3 space-y-1">
-            {MenuItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeParent === item.key;
+          <nav className="p-3 space-y-1.5 overflow-y-auto max-h-[calc(100vh-140px)]">
+            {/* Dashboard as top item without children */}
+            <button
+              onClick={() => {
+                setActiveParent('Dashboard');
+                setExpandedParent(null);
+                localStorage.removeItem('dvarix_expanded_parent');
+                setIsMobileOpen(false);
+              }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all duration-300 relative group cursor-pointer sidebar-item-button ${
+                activeParent === 'Dashboard'
+                  ? 'sidebar-item-active bg-white/5 text-[#C89B3C] border border-[#C89B3C]/20 shadow-[0_0_12px_rgba(200,155,60,0.1)]'
+                  : 'sidebar-item-inactive text-slate-300 hover:text-white hover:bg-white/5 border border-transparent'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="absolute inset-0 bg-gradient-to-r from-[#C89B3C]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-xl pointer-events-none" />
+                <LucideIcons.LayoutDashboard className={`h-4.5 w-4.5 shrink-0 transition-colors duration-300 ${activeParent === 'Dashboard' ? 'text-[#C89B3C]' : 'text-slate-400 group-hover:text-[#C89B3C]'}`} />
+                {!isSidebarCollapsed && (
+                  <span className="text-xs font-semibold font-sans tracking-tight pt-0.5 leading-none">Dashboard</span>
+                )}
+              </div>
+              {!isSidebarCollapsed && activeParent === 'Dashboard' && (
+                <span className="h-1.5 w-1.5 bg-[#C89B3C] rounded-full shadow-[0_0_8px_#C89B3C]" />
+              )}
+            </button>
+
+            {/* Expandable parent categories */}
+            {sidebarStructure.map((cat) => {
+              if (cat.key === "Dashboard") return null; // Already rendered manually above
+              const ParentIcon = resolveIcon(cat.iconName);
+              const isCurrentParentActive = isParentActive(cat);
+              const isExpanded = expandedParent === cat.key;
+              
               return (
-                <button
-                  key={item.key}
-                  onClick={() => setActiveParent(item.key as any)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition leading-none cursor-pointer ${
-                    isActive 
-                      ? 'bg-blue-50/50 text-blue-600 border border-blue-100' 
-                      : 'text-slate-650 hover:bg-slate-50 border border-transparent'
-                  }`}
-                  title={item.key}
-                >
-                  <Icon className={`h-4.5 w-4.5 shrink-0 ${isActive ? 'text-blue-650' : 'text-slate-400'}`} />
-                  {!isSidebarCollapsed && (
-                    <span className="text-xs font-bold font-sans tracking-tight leading-none pt-0.5">{item.key}</span>
-                  )}
-                </button>
+                <div key={cat.key} className="space-y-1">
+                  {/* Parent Button */}
+                  <button
+                    onClick={() => handleParentClick(cat)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all duration-300 relative group cursor-pointer sidebar-item-button ${
+                      isCurrentParentActive
+                        ? 'sidebar-item-active bg-white/5 text-[#C89B3C] border border-[#C89B3C]/20 shadow-[0_0_12px_rgba(200,155,60,0.1)]'
+                        : 'sidebar-item-inactive text-slate-300 hover:text-white hover:bg-white/5 border border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="absolute inset-0 bg-gradient-to-r from-[#C89B3C]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-xl pointer-events-none" />
+                      
+                      <ParentIcon className={`h-4.5 w-4.5 shrink-0 transition-colors duration-300 ${isCurrentParentActive ? 'text-[#C89B3C]' : 'text-slate-400 group-hover:text-[#C89B3C]'}`} />
+                      
+                      {!isSidebarCollapsed && (
+                        <span className="text-xs font-semibold font-sans tracking-tight pt-0.5 leading-none">{cat.label}</span>
+                      )}
+                    </div>
+
+                    {!isSidebarCollapsed && (
+                      <div className="flex items-center gap-2">
+                        {/* Child Count Badge */}
+                        <span className="badge-count bg-[#1e2d4a] text-[#C89B3C] border border-[#C89B3C]/10 px-1.5 py-0.5 rounded-full text-[9px] font-mono font-bold leading-none">
+                          {cat.children.length}
+                        </span>
+                        
+                        {/* Expand/Collapse Arrow */}
+                        <ChevronRight 
+                          className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 ${
+                            isExpanded ? 'rotate-90 text-[#C89B3C]' : ''
+                          }`} 
+                        />
+                      </div>
+                    )}
+                  </button>
+
+                  {/* Children Map with Accordion Expand Animation */}
+                  <AnimatePresence initial={false}>
+                    {isExpanded && !isSidebarCollapsed && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="submenu-accordion overflow-hidden pl-3.5 space-y-1.5 mt-1 border-l border-[#1e2d4a]"
+                      >
+                        {cat.children.map((child) => {
+                          const ChildIcon = resolveIcon(child.iconName);
+                          const isChildSelected = isChildActive(child.key);
+                          return (
+                            <button
+                              key={child.key}
+                              onClick={() => handleChildClick(child.key)}
+                              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-all duration-200 relative group cursor-pointer ${
+                                isChildSelected
+                                  ? 'submenu-item-selected bg-[#1e3454] text-white border-l-2 border-[#C89B3C] font-semibold pl-2'
+                                  : 'submenu-item-normal text-slate-400 hover:text-white hover:bg-white/5 pl-3'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <ChildIcon className={`h-3.5 w-3.5 transition-colors duration-200 ${isChildSelected ? 'text-[#C89B3C]' : 'text-slate-500 group-hover:text-[#C89B3C]/85'}`} />
+                                <span className="text-[11px] tracking-tight">{child.label}</span>
+                              </div>
+                              {isChildSelected && (
+                                <span className="h-1 w-1 bg-[#C89B3C] rounded-full" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               );
             })}
           </nav>
         </div>
 
         {/* Retractable Collapse Trigger at footer */}
-        <div className="p-4 border-t border-slate-100">
+        <div className="p-4 border-t border-[#1e2d4a]/60">
           <button 
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="w-full flex items-center justify-center p-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-500 transition text-[10px] uppercase font-bold tracking-wider cursor-pointer font-sans"
+            className="w-full flex items-center justify-center gap-2 p-2 rounded-xl bg-[#1e2d4a]/40 hover:bg-[#1e2d4a] border border-[#1e2d4a] text-slate-300 hover:text-white transition duration-250 text-[10px] uppercase font-bold tracking-wider cursor-pointer font-sans"
           >
-            {isSidebarCollapsed ? '→' : '◀ Collapse Sidebar'}
+            {isSidebarCollapsed ? (
+              <ChevronRight className="h-4 w-4 text-[#C89B3C]" />
+            ) : (
+              <>
+                <LucideIcons.ChevronLeft className="h-4 w-4 text-[#C89B3C]" />
+                <span>Collapse Sidebar</span>
+              </>
+            )}
           </button>
         </div>
       </aside>
@@ -1326,15 +2299,26 @@ AI STRATEGY PROPOSAL:
         {/* STICKY UPPER HEADER */}
         <header className="sticky top-0 bg-white border-b border-slate-200 h-16 flex items-center justify-between px-6 z-10 shadow-xs">
           
-          {/* Global search */}
-          <div className="relative w-72">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Query requirements, agents, valuations..."
-              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 font-sans"
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+          <div className="flex items-center gap-4">
+            {/* Hamburger Trigger for Mobile/Tablet */}
+            <button
+              onClick={() => setIsMobileOpen(true)}
+              className="lg:hidden p-2 text-slate-600 hover:text-[#0B1F3A] hover:bg-slate-100 rounded-lg cursor-pointer transition"
+              id="mobile-hamburger-trigger"
+            >
+              <LucideIcons.Menu className="h-5 w-5" />
+            </button>
+
+            {/* Global search */}
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Query requirements, agents, valuations..."
+                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 font-sans"
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
           </div>
 
           {/* Quick interactive utility CTAs */}
@@ -1981,6 +2965,10 @@ AI STRATEGY PROPOSAL:
               })()}
 
               {/* PANEL 10: MARKETING CAMPAIGNS */}
+              {activeParent === 'Free Service Requests' && (
+                <FreeServiceRequestsPanel agents={agents} />
+              )}
+
               {activeParent === 'Marketing' && (
                 <SaaSMarketingModule
                   leads={leads}
@@ -2228,6 +3216,8 @@ AI STRATEGY PROPOSAL:
               {activeParent === 'FAQ Management' && (
                 <SaaSFAQModule
                   faqs={faqs}
+                  siteSettings={siteSettings}
+                  setSiteSettings={setSiteSettings}
                 />
               )}
 
@@ -2271,6 +3261,16 @@ AI STRATEGY PROPOSAL:
                   properties={properties}
                   setProperties={setProperties}
                   loggedInUser={loggedInUser}
+                />
+              )}
+
+              {/* PANEL 14.5: ENTERPRISE THEME & APPEARANCE STUDIO */}
+              {activeParent === 'Theme Studio' && (
+                <SaaSThemeStudioModule
+                  currentTheme={adminTheme}
+                  onApplyTheme={setAdminTheme}
+                  isSuperAdminUser={isSuperAdminUser}
+                  loggedInUserEmail={loggedInUser?.email || ''}
                 />
               )}
 
@@ -2421,7 +3421,7 @@ AI STRATEGY PROPOSAL:
 
                   {/* CMS Sub navigation tabs */}
                   <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-1">
-                    {(['General', 'Hero', 'Services', 'Campaigns', 'Testimonials', 'Blogs'] as const).map((tab) => (
+                    {(['General', 'Hero', 'Luxury Banners', 'Services', 'Campaigns', 'Testimonials', 'Blogs', 'Statistics', 'Footer'] as const).map((tab) => (
                       <button
                         key={tab}
                         onClick={() => setCmsActiveTab(tab)}
@@ -2431,7 +3431,7 @@ AI STRATEGY PROPOSAL:
                             : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
                         }`}
                       >
-                        {tab === 'Hero' ? 'Hero Section' : tab === 'Blogs' ? 'Blog Insights' : tab}
+                        {tab === 'Hero' ? 'Hero Section' : tab === 'Luxury Banners' ? 'Luxury Hero Banners' : tab === 'Blogs' ? 'Blog Insights' : tab === 'Statistics' ? 'Performance Stats' : tab === 'Footer' ? 'Footer Management' : tab}
                       </button>
                     ))}
                   </div>
@@ -2665,6 +3665,17 @@ AI STRATEGY PROPOSAL:
                     </div>
                   )}
 
+                  {/* SECTION: LUXURY HERO BANNERS (DYNAMIC) */}
+                  {cmsActiveTab === "Luxury Banners" && (
+                    <HeroBannerManager 
+                      siteSettings={siteSettings}
+                      setSiteSettings={setSiteSettings}
+                      properties={properties}
+                      categories={categories}
+                      heroBanners={heroBanners}
+                    />
+                  )}
+
                   {/* SECTION 3: SERVICES */}
                   {cmsActiveTab === 'Services' && (
                     <div className="space-y-6 max-w-2xl mx-auto">
@@ -2770,172 +3781,10 @@ AI STRATEGY PROPOSAL:
 
                   {/* SECTION 4: CAMPAIGNS & OFFERS */}
                   {cmsActiveTab === 'Campaigns' && (
-                    <div className="space-y-6 max-w-2xl mx-auto">
-                      {/* Form to Add Offer */}
-                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
-                        <div className="border-b border-slate-100 pb-2">
-                          <h3 className="font-semibold text-slate-800 text-sm">Publish Offer / Promotional Banner</h3>
-                          <p className="text-[11px] text-slate-400">Launch dynamic marketing programs and zero brokerage campaigns.</p>
-                        </div>
-
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                              <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Campaign Title</label>
-                              <input
-                                type="text"
-                                value={newOfferTitle}
-                                onChange={(e) => setNewOfferTitle(e.target.value)}
-                                placeholder="e.g. Monsoon Brokerage Wave"
-                                className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
-                              />
-                            </div>
-
-                            <div className="space-y-1">
-                              <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Header Badge (Label)</label>
-                              <input
-                                type="text"
-                                value={newOfferBadge}
-                                onChange={(e) => setNewOfferBadge(e.target.value)}
-                                className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs font-bold text-slate-900"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Description Text</label>
-                            <textarea
-                              rows={2}
-                              value={newOfferDesc}
-                              onChange={(e) => setNewOfferDesc(e.target.value)}
-                              placeholder="Describe limits, benefits and requirements..."
-                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                              <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Validity Period / Date</label>
-                              <input
-                                type="text"
-                                value={newOfferValidTill}
-                                onChange={(e) => setNewOfferValidTill(e.target.value)}
-                                placeholder="e.g. 2026-08-31"
-                                className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs font-mono"
-                              />
-                            </div>
-
-                            <div className="space-y-1">
-                              <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Illustrative Cover Image URL</label>
-                              <input
-                                type="text"
-                                value={newOfferImage}
-                                onChange={(e) => setNewOfferImage(e.target.value)}
-                                placeholder="https://unsplash.com/..."
-                                className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-mono text-[11px]"
-                              />
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={() => {
-                              if (!newOfferTitle.trim() || !newOfferDesc.trim()) return;
-                              const currentOffers = siteSettings?.offers || [];
-                              const updatedOffers = [
-                                ...currentOffers,
-                                {
-                                  id: `offer-${Date.now()}`,
-                                  title: newOfferTitle,
-                                  badge: newOfferBadge,
-                                  description: newOfferDesc,
-                                  validTill: newOfferValidTill,
-                                  image: newOfferImage || "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=600&q=80",
-                                  active: true
-                                }
-                              ];
-                              const newSettings = {
-                                ...(siteSettings as SiteCMSConfig),
-                                offers: updatedOffers
-                              };
-                              setSiteSettings?.(newSettings);
-                              firebaseService.saveSiteSettings(newSettings);
-                              setNewOfferTitle('');
-                              setNewOfferDesc('');
-                              setNewOfferValidTill('');
-                              setNewOfferImage('');
-                              window.dispatchEvent(new CustomEvent('cms-alert-notification', {
-                                detail: {
-                                  title: "Campaign Published",
-                                  message: "New active promotional campaign published on live layout.",
-                                  category: "Campaigns"
-                                }
-                              }));
-                            }}
-                            className="w-full py-2 bg-[#ff5a3c] hover:bg-[#e04326] text-white font-bold rounded-lg transition cursor-pointer text-xs"
-                          >
-                            Publish Campaign Item
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Active Campaigns list */}
-                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
-                        <h3 className="font-semibold text-slate-800 text-sm">Active Live Campaigns</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {(siteSettings?.offers || []).length > 0 ? (
-                            (siteSettings?.offers || []).map((offer, idx) => (
-                              <div key={offer.id || idx} className="border border-slate-100 rounded-xl p-4 space-y-3 relative">
-                                <div className="flex justify-between items-start">
-                                  <span className="text-[9px] uppercase font-mono font-bold bg-[#ff5a3c]/10 text-[#ff5a3c] border border-[#ff5a3c]/20 px-2 py-0.5 rounded">
-                                    {offer.badge}
-                                  </span>
-                                  <button
-                                    onClick={() => {
-                                      const updated = (siteSettings?.offers || []).filter(o => o.id !== offer.id);
-                                      const newSettings = {
-                                        ...(siteSettings as SiteCMSConfig),
-                                        offers: updated
-                                      };
-                                      setSiteSettings?.(newSettings);
-                                      firebaseService.saveSiteSettings(newSettings);
-                                    }}
-                                    className="text-red-500 hover:text-red-700 font-mono text-[9px] uppercase font-bold"
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                                <div className="space-y-1">
-                                  <h4 className="font-bold text-slate-900 text-xs">{offer.title}</h4>
-                                  <p className="text-slate-500 text-[11px] leading-relaxed line-clamp-3">{offer.description}</p>
-                                </div>
-                                <div className="text-[9px] font-mono text-slate-400 border-t border-slate-50/80 pt-2 flex justify-between">
-                                  <span>TILL: {offer.validTill || "N/A"}</span>
-                                  <button
-                                    onClick={() => {
-                                      const updated = (siteSettings?.offers || []).map(o => {
-                                        if (o.id === offer.id) return { ...o, active: !o.active };
-                                        return o;
-                                      });
-                                      const newSettings = {
-                                        ...(siteSettings as SiteCMSConfig),
-                                        offers: updated
-                                      };
-                                      setSiteSettings?.(newSettings);
-                                      firebaseService.saveSiteSettings(newSettings);
-                                    }}
-                                    className={`font-black ${offer.active ? 'text-emerald-600' : 'text-slate-400'}`}
-                                  >
-                                    {offer.active ? 'ACTIVE (LIVE)' : 'DISABLED'}
-                                  </button>
-                                </div>
-                              </div>
-                            ))
-                          ) : (
-                            <p className="col-span-2 text-center text-slate-400 py-4 font-sans italic">No custom campaigns launched yet. Fallback active.</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                    <CampaignManager
+                      siteSettings={siteSettings}
+                      setSiteSettings={setSiteSettings}
+                    />
                   )}
 
                   {/* SECTION 5: TESTIMONIALS */}
@@ -3093,168 +3942,1023 @@ AI STRATEGY PROPOSAL:
 
                   {/* SECTION 6: BLOG ARTICLES */}
                   {cmsActiveTab === 'Blogs' && (
-                    <div className="space-y-6 max-w-2xl mx-auto">
-                      {/* Form to Add Blog */}
-                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
+                    <BlogManager 
+                      siteSettings={siteSettings}
+                      setSiteSettings={setSiteSettings}
+                    />
+                  )}
+
+                  {cmsActiveTab === 'Statistics' && (
+                    <div className="space-y-6 max-w-2xl mx-auto animate-in fade-in duration-200">
+                      {/* Section 1: Global Statistics Settings */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4 text-left">
                         <div className="border-b border-slate-100 pb-2">
-                          <h3 className="font-semibold text-slate-800 text-sm">Publish News & Market Insight</h3>
-                          <p className="text-[11px] text-slate-400">Post localized articles, sector updates, and advice briefs.</p>
+                          <h3 className="font-semibold text-slate-800 text-sm">Global Animation Parameters</h3>
+                          <p className="text-[11px] text-slate-400">Configure count-up speed and stagger entrance intervals. No values are hardcoded.</p>
                         </div>
-
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                              <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Article Title</label>
-                              <input
-                                type="text"
-                                value={newBlogTitle}
-                                onChange={(e) => setNewBlogTitle(e.target.value)}
-                                placeholder="e.g. Bangalore Outer Ring Road Valuations"
-                                className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
-                              />
-                            </div>
-
-                            <div className="space-y-1">
-                              <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Author Name / Desk</label>
-                              <input
-                                type="text"
-                                value={newBlogAuthor}
-                                onChange={(e) => setNewBlogAuthor(e.target.value)}
-                                placeholder="e.g. Sourcing Board"
-                                className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
-                              />
-                            </div>
-                          </div>
-
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="space-y-1">
-                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Article Excerpt (Short Summary)</label>
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Count-Up Duration (Seconds)</label>
                             <input
-                              type="text"
-                              value={newBlogExcerpt}
-                              onChange={(e) => setNewBlogExcerpt(e.target.value)}
-                              placeholder="Brief summary for list views..."
+                              type="number"
+                              step="0.1"
+                              value={statAnimDuration}
+                              onChange={(e) => setStatAnimDuration(parseFloat(e.target.value) || 2.0)}
                               className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
                             />
+                            <p className="text-[9px] text-slate-400">Total count duration for numeric statistics.</p>
                           </div>
-
                           <div className="space-y-1">
-                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Full Content Body</label>
-                            <textarea
-                              rows={4}
-                              value={newBlogContent}
-                              onChange={(e) => setNewBlogContent(e.target.value)}
-                              placeholder="Write complete article details..."
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Stagger Delay (ms)</label>
+                            <input
+                              type="number"
+                              step="50"
+                              value={statAnimDelay}
+                              onChange={(e) => setStatAnimDelay(parseInt(e.target.value, 10) || 150)}
                               className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
                             />
+                            <p className="text-[9px] text-slate-400">Delay between individual card entrances.</p>
                           </div>
-
-                          <div className="space-y-1">
-                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Banner Cover Image URL</label>
-                            <input
-                              type="text"
-                              value={newBlogImage}
-                              onChange={(e) => setNewBlogImage(e.target.value)}
-                              placeholder="https://unsplash.com/..."
-                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-mono text-[11px]"
-                            />
-                          </div>
-
+                        </div>
+                        <div className="flex justify-end">
                           <button
                             onClick={() => {
-                              if (!newBlogTitle.trim() || !newBlogContent.trim()) return;
-                              const currentBlogs = siteSettings?.blogs || [];
-                              const updatedBlogs = [
-                                ...currentBlogs,
-                                {
-                                  id: `blog-${Date.now()}`,
-                                  title: newBlogTitle,
-                                  excerpt: newBlogExcerpt || newBlogTitle,
-                                  content: newBlogContent,
-                                  image: newBlogImage || "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80",
-                                  date: new Date().toISOString().split('T')[0],
-                                  author: newBlogAuthor || "Advisors Board",
-                                  published: true
-                                }
-                              ];
                               const newSettings = {
                                 ...(siteSettings as SiteCMSConfig),
-                                blogs: updatedBlogs
+                                statisticsSettings: {
+                                  animationDuration: statAnimDuration,
+                                  animationDelay: statAnimDelay
+                                }
                               };
                               setSiteSettings?.(newSettings);
                               firebaseService.saveSiteSettings(newSettings);
-                              setNewBlogTitle('');
-                              setNewBlogExcerpt('');
-                              setNewBlogContent('');
-                              setNewBlogAuthor('');
-                              setNewBlogImage('');
                               window.dispatchEvent(new CustomEvent('cms-alert-notification', {
                                 detail: {
-                                  title: "Insight Published",
-                                  message: "New real estate insights brief posted on active CMS.",
-                                  category: "Blogs"
+                                  title: "Settings Saved",
+                                  message: "Global animation parameters synchronized successfully.",
+                                  category: "Statistics"
                                 }
                               }));
                             }}
-                            className="w-full py-2 bg-[#ff5a3c] hover:bg-[#e04326] text-white font-bold rounded-lg transition cursor-pointer text-xs"
+                            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition cursor-pointer text-xs"
                           >
-                            Publish Insight Article
+                            Save Settings
                           </button>
                         </div>
                       </div>
 
-                      {/* Configured Blogs List */}
-                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
-                        <h3 className="font-semibold text-slate-800 text-sm">Active Insights Feed</h3>
+                      {/* Section 2: Card Add / Edit Form */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4 text-left">
+                        <div className="border-b border-slate-100 pb-2">
+                          <h3 className="font-semibold text-slate-800 text-sm">
+                            {editingStatId ? 'Edit Performance Statistic' : 'Add New Statistic Card'}
+                          </h3>
+                          <p className="text-[11px] text-slate-400">Customize card graphics, numbers, and descriptive labels.</p>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="space-y-1">
+                              <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Card Icon / Emoji *</label>
+                              <input
+                                type="text"
+                                value={statIcon}
+                                onChange={(e) => setStatIcon(e.target.value)}
+                                placeholder="e.g. 🏠 or 📍"
+                                className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Statistic Number *</label>
+                              <input
+                                type="text"
+                                value={statNumber}
+                                onChange={(e) => setStatNumber(e.target.value)}
+                                placeholder="e.g. 450+ or 98%"
+                                className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Display Order *</label>
+                              <input
+                                type="number"
+                                value={statOrder}
+                                onChange={(e) => setStatOrder(parseInt(e.target.value, 10) || 1)}
+                                className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Statistic Title / Label *</label>
+                            <input
+                              type="text"
+                              value={statTitle}
+                              onChange={(e) => setStatTitle(e.target.value)}
+                              placeholder="e.g. Verified Properties"
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Sub-description (Optional)</label>
+                            <input
+                              type="text"
+                              value={statDescription}
+                              onChange={(e) => setStatDescription(e.target.value)}
+                              placeholder="e.g. Vetted real estate assets with clear titles."
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 py-1.5">
+                            <input
+                              type="checkbox"
+                              id="statEnabledCheck"
+                              checked={statEnabled}
+                              onChange={(e) => setStatEnabled(e.target.checked)}
+                              className="rounded text-sky-600 focus:ring-sky-500 h-4 w-4"
+                            />
+                            <label htmlFor="statEnabledCheck" className="text-xs text-slate-700 font-medium select-none">
+                              Enable this statistic card on website
+                            </label>
+                          </div>
+
+                          {/* Live Dynamic Card Preview Block */}
+                          <div className="p-4 bg-slate-900 rounded-xl border border-slate-800 space-y-2.5">
+                            <p className="text-[10px] font-mono font-black text-[#FF6B3D] uppercase tracking-widest">Real-time Admin Preview</p>
+                            <div className="p-5 bg-slate-950/40 rounded-xl border border-[#FF6B3D]/20 space-y-2 select-none text-left">
+                              <span className="text-3xl filter drop-shadow-[0_2px_8px_rgba(255,107,61,0.15)] block mb-1">
+                                {statIcon || "❓"}
+                              </span>
+                              <h3 className="text-2xl font-sans font-black tracking-tight text-white">
+                                {statNumber || "0"}
+                              </h3>
+                              <p className="text-xs font-sans font-bold text-[#FF6B3D] tracking-wide uppercase">
+                                {statTitle || "Your Statistic Title"}
+                              </p>
+                              {statDescription && (
+                                <p className="text-slate-400 text-[11px] font-light leading-relaxed">
+                                  {statDescription}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 justify-end pt-2">
+                            {editingStatId && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingStatId(null);
+                                  setStatIcon('🏠');
+                                  setStatNumber('');
+                                  setStatTitle('');
+                                  setStatDescription('');
+                                  setStatEnabled(true);
+                                  setStatOrder((siteSettings?.statisticsCards || []).length + 1);
+                                }}
+                                className="px-4 py-2 border border-slate-205 hover:bg-slate-50 text-slate-700 font-bold rounded-lg transition cursor-pointer text-xs"
+                              >
+                                Cancel Edit
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!statIcon || !statNumber || !statTitle) {
+                                  alert('Please enter an icon/emoji, statistic number, and title.');
+                                  return;
+                                }
+
+                                const cardsList = siteSettings?.statisticsCards || [];
+                                let updated: any[];
+
+                                if (editingStatId) {
+                                  updated = cardsList.map(c => {
+                                    if (c.id === editingStatId) {
+                                      return {
+                                        ...c,
+                                        icon: statIcon,
+                                        number: statNumber,
+                                        title: statTitle,
+                                        description: statDescription,
+                                        displayOrder: statOrder,
+                                        enabled: statEnabled
+                                      };
+                                    }
+                                    return c;
+                                  });
+                                } else {
+                                  const newCard = {
+                                    id: "stat_" + Date.now(),
+                                    icon: statIcon,
+                                    number: statNumber,
+                                    title: statTitle,
+                                    description: statDescription,
+                                    displayOrder: statOrder,
+                                    enabled: statEnabled
+                                  };
+                                  updated = [...cardsList, newCard];
+                                }
+
+                                const newSettings = {
+                                  ...(siteSettings as SiteCMSConfig),
+                                  statisticsCards: updated
+                                };
+
+                                setSiteSettings?.(newSettings);
+                                firebaseService.saveSiteSettings(newSettings);
+
+                                // Reset form
+                                setEditingStatId(null);
+                                setStatIcon('🏠');
+                                setStatNumber('');
+                                setStatTitle('');
+                                setStatDescription('');
+                                setStatEnabled(true);
+                                setStatOrder(updated.length + 1);
+
+                                window.dispatchEvent(new CustomEvent('cms-alert-notification', {
+                                  detail: {
+                                    title: editingStatId ? "Card Updated" : "Card Created",
+                                    message: editingStatId ? "Statistic card updated on live database." : "New performance statistics card added to index.",
+                                    category: "Statistics"
+                                  }
+                                }));
+                              }}
+                              className="px-4 py-2 bg-[#ff5a3c] hover:bg-[#e04326] text-white font-bold rounded-lg transition cursor-pointer text-xs"
+                            >
+                              {editingStatId ? 'Save Statistic Card' : 'Create Statistic Card'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Section 3: Manage Cards / Reordering */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4 text-left">
+                        <h3 className="font-semibold text-slate-800 text-sm">Active Statistics Directory</h3>
+                        <p className="text-[11px] text-slate-400">Reorder, edit, duplicate, toggle visibility or delete active cards.</p>
                         <div className="divide-y divide-slate-100">
-                          {(siteSettings?.blogs || []).length > 0 ? (
-                            (siteSettings?.blogs || []).map((blog, idx) => (
-                              <div key={blog.id || idx} className="py-4 flex justify-between items-start gap-4">
-                                <div className="space-y-1">
-                                  <span className="text-[9px] font-mono text-slate-400 block uppercase">
-                                    {blog.date} • BY {blog.author.toUpperCase()}
-                                  </span>
-                                  <h4 className="font-bold text-slate-900 text-xs">{blog.title}</h4>
-                                  <p className="text-slate-500 text-[11px] leading-relaxed line-clamp-2">{blog.excerpt}</p>
-                                </div>
-                                <div className="flex flex-col gap-2 items-end">
-                                  <button
-                                    onClick={() => {
-                                      const updated = (siteSettings?.blogs || []).filter(b => b.id !== blog.id);
+                          {(siteSettings?.statisticsCards || []).length > 0 ? (
+                            [...(siteSettings?.statisticsCards || [])]
+                              .sort((a, b) => a.displayOrder - b.displayOrder)
+                              .map((card, idx, sortedArr) => (
+                                <div
+                                  key={card.id}
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.effectAllowed = 'move';
+                                    setDraggedCardId(card.id);
+                                  }}
+                                  onDragOver={(e) => {
+                                    e.preventDefault();
+                                  }}
+                                  onDrop={(e) => {
+                                    e.preventDefault();
+                                    if (!draggedCardId || draggedCardId === card.id) return;
+                                    
+                                    const cardsList = [...(siteSettings?.statisticsCards || [])].sort((a, b) => a.displayOrder - b.displayOrder);
+                                    const draggedIndex = cardsList.findIndex(c => c.id === draggedCardId);
+                                    const targetIndex = cardsList.findIndex(c => c.id === card.id);
+                                    
+                                    if (draggedIndex !== -1 && targetIndex !== -1) {
+                                      const [movedCard] = cardsList.splice(draggedIndex, 1);
+                                      cardsList.splice(targetIndex, 0, movedCard);
+                                      
+                                      // Re-assign displayOrders sequentially
+                                      const updated = cardsList.map((c, i) => ({
+                                        ...c,
+                                        displayOrder: i + 1
+                                      }));
+                                      
                                       const newSettings = {
                                         ...(siteSettings as SiteCMSConfig),
-                                        blogs: updated
+                                        statisticsCards: updated
                                       };
                                       setSiteSettings?.(newSettings);
                                       firebaseService.saveSiteSettings(newSettings);
-                                    }}
-                                    className="text-red-500 hover:text-red-700 font-mono text-[9px] uppercase font-bold"
-                                  >
-                                    Delete
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      const updated = (siteSettings?.blogs || []).map(b => {
-                                        if (b.id === blog.id) return { ...b, published: !b.published };
-                                        return b;
-                                      });
-                                      const newSettings = {
-                                        ...(siteSettings as SiteCMSConfig),
-                                        blogs: updated
-                                      };
-                                      setSiteSettings?.(newSettings);
-                                      firebaseService.saveSiteSettings(newSettings);
-                                    }}
-                                    className={`text-[9px] font-mono uppercase font-black ${blog.published ? 'text-emerald-600' : 'text-slate-400'}`}
-                                  >
-                                    {blog.published ? 'PUBLISHED' : 'DRAFT'}
-                                  </button>
+                                      
+                                      window.dispatchEvent(new CustomEvent('cms-alert-notification', {
+                                        detail: {
+                                          title: "Order Saved",
+                                          message: `Display order updated via drag & drop.`,
+                                          category: "Statistics"
+                                        }
+                                      }));
+                                    }
+                                    setDraggedCardId(null);
+                                  }}
+                                  onDragEnd={() => setDraggedCardId(null)}
+                                  className={`py-3 px-4 flex justify-between items-center gap-4 border-b border-slate-100 hover:bg-slate-50/80 transition-all rounded-xl select-none cursor-grab active:cursor-grabbing ${
+                                    draggedCardId === card.id ? 'opacity-40 bg-slate-150 border-dashed border-2 border-[#FF6B3D]/40' : ''
+                                  }`}
+                                  title="Drag card to reorder"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-slate-400 font-mono text-xs select-none pr-1">⋮⋮</span>
+                                    <span className="text-2xl">{card.icon}</span>
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center gap-2">
+                                        <h4 className="font-bold text-slate-900 text-xs">{card.number}</h4>
+                                        <span className="text-[10px] text-slate-400 font-normal font-sans">({card.title})</span>
+                                      </div>
+                                      {card.description && (
+                                        <p className="text-slate-505 text-[11px] leading-relaxed max-w-sm line-clamp-1">{card.description}</p>
+                                      )}
+                                      <span className="text-[9px] font-mono text-slate-400 block uppercase">
+                                        Order: {card.displayOrder} • {card.enabled ? 'ACTIVE' : 'DISABLED'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-3" onDragStart={(e) => e.stopPropagation()} draggable={false}>
+                                    {/* Up/Down Reordering controllers with clean animations */}
+                                    <div className="flex flex-col gap-1">
+                                      <button
+                                        disabled={idx === 0}
+                                        onClick={() => {
+                                          const sibling = sortedArr[idx - 1];
+                                          const updated = siteSettings?.statisticsCards?.map(c => {
+                                            if (c.id === card.id) return { ...c, displayOrder: sibling.displayOrder };
+                                            if (c.id === sibling.id) return { ...c, displayOrder: card.displayOrder };
+                                            return c;
+                                          });
+                                          const newSettings = { ...(siteSettings as SiteCMSConfig), statisticsCards: updated };
+                                          setSiteSettings?.(newSettings);
+                                          firebaseService.saveSiteSettings(newSettings);
+                                        }}
+                                        className="p-1 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none transition text-[10px]"
+                                        title="Move Up"
+                                      >
+                                        ▲
+                                      </button>
+                                      <button
+                                        disabled={idx === sortedArr.length - 1}
+                                        onClick={() => {
+                                          const sibling = sortedArr[idx + 1];
+                                          const updated = siteSettings?.statisticsCards?.map(c => {
+                                            if (c.id === card.id) return { ...c, displayOrder: sibling.displayOrder };
+                                            if (c.id === sibling.id) return { ...c, displayOrder: card.displayOrder };
+                                            return c;
+                                          });
+                                          const newSettings = { ...(siteSettings as SiteCMSConfig), statisticsCards: updated };
+                                          setSiteSettings?.(newSettings);
+                                          firebaseService.saveSiteSettings(newSettings);
+                                        }}
+                                        className="p-1 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none transition text-[10px]"
+                                        title="Move Down"
+                                      >
+                                        ▼
+                                      </button>
+                                    </div>
+
+                                    <div className="flex flex-col items-end gap-1.5">
+                                      <div className="flex gap-2">
+                                        <button
+                                          onClick={() => {
+                                            setEditingStatId(card.id);
+                                            setStatIcon(card.icon);
+                                            setStatNumber(card.number);
+                                            setStatTitle(card.title);
+                                            setStatDescription(card.description || '');
+                                            setStatEnabled(card.enabled);
+                                            setStatOrder(card.displayOrder);
+                                          }}
+                                          className="text-sky-600 hover:text-sky-800 font-mono text-[9px] uppercase font-bold"
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            // Duplicate card
+                                            const newCard = {
+                                              ...card,
+                                              id: "stat_" + Date.now(),
+                                              title: card.title + " (Copy)",
+                                              displayOrder: (siteSettings?.statisticsCards || []).length + 1
+                                            };
+                                            const updated = [...(siteSettings?.statisticsCards || []), newCard];
+                                            const newSettings = { ...(siteSettings as SiteCMSConfig), statisticsCards: updated };
+                                            setSiteSettings?.(newSettings);
+                                            firebaseService.saveSiteSettings(newSettings);
+                                          }}
+                                          className="text-amber-600 hover:text-amber-800 font-mono text-[9px] uppercase font-bold"
+                                        >
+                                          Duplicate
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            const updated = (siteSettings?.statisticsCards || []).filter(c => c.id !== card.id);
+                                            const newSettings = { ...(siteSettings as SiteCMSConfig), statisticsCards: updated };
+                                            setSiteSettings?.(newSettings);
+                                            firebaseService.saveSiteSettings(newSettings);
+                                          }}
+                                          className="text-red-500 hover:text-red-700 font-mono text-[9px] uppercase font-bold"
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          const updated = (siteSettings?.statisticsCards || []).map(c => {
+                                            if (c.id === card.id) return { ...c, enabled: !c.enabled };
+                                            return c;
+                                          });
+                                          const newSettings = { ...(siteSettings as SiteCMSConfig), statisticsCards: updated };
+                                          setSiteSettings?.(newSettings);
+                                          firebaseService.saveSiteSettings(newSettings);
+                                        }}
+                                        className={`text-[9px] font-mono uppercase font-black ${card.enabled ? 'text-emerald-600' : 'text-slate-400'}`}
+                                      >
+                                        {card.enabled ? 'ENABLED' : 'DISABLED'}
+                                      </button>
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
-                            ))
+                              ))
                           ) : (
-                            <p className="text-center text-slate-400 py-4 font-sans italic">No insights posted yet. Fallback active.</p>
+                            <p className="text-center text-slate-400 py-4 font-sans italic">No statistics cards created yet.</p>
                           )}
                         </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {cmsActiveTab === 'Footer' && (
+                    <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in duration-200 text-left">
+                      {/* Top bar with quick actions */}
+                      <div className="bg-slate-900 text-white p-5 rounded-2xl border border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-md">
+                        <div>
+                          <h3 className="font-sans font-bold text-sm text-white">Live Footer Customization</h3>
+                          <p className="text-[11px] text-slate-400 font-sans mt-0.5">Configure logos, custom links, vectors, and responsive trust indicators below.</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const updatedConfig = {
+                              logoText: footerLogoText,
+                              brandDescription: footerBrandDescription,
+                              ctas: footerCtas,
+                              companyLinks: footerCompanyLinks,
+                              servicesLinks: footerServicesLinks,
+                              quickLinks: footerQuickLinks,
+                              address: footerAddress,
+                              phone: footerPhone,
+                              email: footerEmail,
+                              socials: footerSocials,
+                              trustCards: footerTrustCards,
+                              copyrightText: footerCopyrightText,
+                              reraBadgeText: footerReraBadgeText,
+                              reraSubtext: footerReraSubtext,
+                              enableSkyline: footerEnableSkyline,
+                              enableTrustStrip: footerEnableTrustStrip,
+                              showSocialIcons: footerShowSocialIcons,
+                              sectionOrder: footerSectionOrder,
+                              businessHours: footerBusinessHours,
+                              whatsappNumber: footerWhatsappNumber,
+                              googleMapsUrl: footerGoogleMapsUrl
+                            };
+                            const newSettings = {
+                              ...(siteSettings as SiteCMSConfig),
+                              footerConfig: updatedConfig
+                            };
+                            setSiteSettings?.(newSettings);
+                            firebaseService.saveSiteSettings(newSettings);
+                            
+                            window.dispatchEvent(new CustomEvent('cms-alert-notification', {
+                              detail: {
+                                title: "Footer Published",
+                                message: "The premium footer has been updated on the live website.",
+                                category: "Footer"
+                              }
+                            }));
+                          }}
+                          className="px-5 py-2.5 bg-gradient-to-r from-[#FF6B3D] to-[#FF5A3C] hover:shadow-[0_2px_12px_rgba(255,107,61,0.2)] text-white font-bold rounded-xl transition-all cursor-pointer text-xs uppercase tracking-wider"
+                        >
+                          Publish Footer Live
+                        </button>
+                      </div>
+
+                      {/* Brand & CTAs */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
+                        <h4 className="font-bold text-slate-800 text-xs border-b border-slate-100 pb-2 uppercase tracking-wide">1. Brand Identity & CTAs</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Logo Monogram Text</label>
+                            <input
+                              type="text"
+                              value={footerLogoText}
+                              onChange={(e) => setFooterLogoText(e.target.value)}
+                              placeholder="DVARIX REALTY"
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Brand Description</label>
+                            <textarea
+                              rows={2}
+                              value={footerBrandDescription}
+                              onChange={(e) => setFooterBrandDescription(e.target.value)}
+                              placeholder="Enter short description..."
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                        </div>
+
+                        {/* CTAs list edit */}
+                        <div className="space-y-3 pt-2">
+                          <label className="font-extrabold text-slate-450 uppercase block text-[10px] border-t border-slate-50 pt-2">Premium Call To Actions (CTAs)</label>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {footerCtas.map((cta, index) => (
+                              <div key={index} className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                                <span className="text-[10px] font-mono text-[#FF6B3D] font-bold">CTA Button {index + 1}</span>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="space-y-1">
+                                    <label className="text-[9px] font-bold text-slate-450 uppercase block">Button Text</label>
+                                    <input
+                                      type="text"
+                                      value={cta.text}
+                                      onChange={(e) => {
+                                        const updated = [...footerCtas];
+                                        updated[index] = { ...updated[index], text: e.target.value };
+                                        setFooterCtas(updated);
+                                      }}
+                                      className="w-full border border-slate-200 p-2 rounded-lg text-xs font-bold text-slate-800 bg-white"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <label className="text-[9px] font-bold text-slate-450 uppercase block">Action/Tab Target</label>
+                                    <select
+                                      value={cta.target}
+                                      onChange={(e) => {
+                                        const updated = [...footerCtas];
+                                        updated[index] = { ...updated[index], target: e.target.value };
+                                        setFooterCtas(updated);
+                                      }}
+                                      className="w-full border border-slate-200 p-2 rounded-lg text-xs text-slate-800 bg-white"
+                                    >
+                                      <option value="Properties">Properties Tab</option>
+                                      <option value="Contact">Contact Advisor</option>
+                                      <option value="About">About Us</option>
+                                      <option value="Home">Home Tab</option>
+                                      <option value="CustomRequest">Custom Property Request</option>
+                                    </select>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Section Order & Layout Toggles */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
+                        <h4 className="font-bold text-slate-800 text-xs border-b border-slate-100 pb-2 uppercase tracking-wide">2. Layout Controls & Column Reordering</h4>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-1">
+                          {/* Left: Column order list */}
+                          <div className="md:col-span-2 space-y-2">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Arrangement Sequence</label>
+                            <div className="space-y-1.5">
+                              {footerSectionOrder.map((sec, idx) => (
+                                <div key={sec} className="flex justify-between items-center px-3 py-2 bg-slate-50 border border-slate-150 rounded-xl">
+                                  <span className="font-mono text-[10px] font-bold uppercase text-slate-600">
+                                    {sec === 'brand' ? '1. Brand Description & CTAs' : sec === 'company' ? '2. Company Navigation Links' : sec === 'services' ? '3. Services Navigation Links' : sec === 'quickLinks' ? '4. Quick/Legal Links' : sec === 'contact' ? '5. Office Coordinates & Socials' : sec}
+                                  </span>
+                                  <div className="flex gap-1.5">
+                                    <button
+                                      disabled={idx === 0}
+                                      onClick={() => {
+                                        const updated = [...footerSectionOrder];
+                                        const temp = updated[idx];
+                                        updated[idx] = updated[idx - 1];
+                                        updated[idx - 1] = temp;
+                                        setFooterSectionOrder(updated);
+                                      }}
+                                      className="p-1 px-2 rounded bg-white hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none text-[10px] border border-slate-200 cursor-pointer"
+                                    >
+                                      ▲
+                                    </button>
+                                    <button
+                                      disabled={idx === footerSectionOrder.length - 1}
+                                      onClick={() => {
+                                        const updated = [...footerSectionOrder];
+                                        const temp = updated[idx];
+                                        updated[idx] = updated[idx + 1];
+                                        updated[idx + 1] = temp;
+                                        setFooterSectionOrder(updated);
+                                      }}
+                                      className="p-1 px-2 rounded bg-white hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none text-[10px] border border-slate-200 cursor-pointer"
+                                    >
+                                      ▼
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Right: Skyline & trust toggles */}
+                          <div className="space-y-4 bg-slate-50/50 p-4 rounded-xl border border-slate-100 text-left">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Display Toggle Features</label>
+                            
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                id="footerSkylineCheck"
+                                checked={footerEnableSkyline}
+                                onChange={(e) => setFooterEnableSkyline(e.target.checked)}
+                                className="rounded border-slate-300 text-[#FF6B3D] focus:ring-[#FF6B3D] h-4 w-4 cursor-pointer"
+                              />
+                              <label htmlFor="footerSkylineCheck" className="text-xs text-slate-700 font-bold select-none cursor-pointer">
+                                Enable Skyline Graphic
+                              </label>
+                            </div>
+
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                id="footerTrustCheck"
+                                checked={footerEnableTrustStrip}
+                                onChange={(e) => setFooterEnableTrustStrip(e.target.checked)}
+                                className="rounded border-slate-300 text-[#FF6B3D] focus:ring-[#FF6B3D] h-4 w-4 cursor-pointer"
+                              />
+                              <label htmlFor="footerTrustCheck" className="text-xs text-slate-700 font-bold select-none cursor-pointer">
+                                Enable Glass Trust Strip
+                              </label>
+                            </div>
+
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                id="footerSocialCheck"
+                                checked={footerShowSocialIcons}
+                                onChange={(e) => setFooterShowSocialIcons(e.target.checked)}
+                                className="rounded border-slate-300 text-[#FF6B3D] focus:ring-[#FF6B3D] h-4 w-4 cursor-pointer"
+                              />
+                              <label htmlFor="footerSocialCheck" className="text-xs text-slate-700 font-bold select-none cursor-pointer">
+                                Show Social Media Profiles
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Navigation Link Lists */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
+                        <h4 className="font-bold text-slate-800 text-xs border-b border-slate-100 pb-2 uppercase tracking-wide">3. Footer Column Link Directories</h4>
+                        
+                        <div className="space-y-5">
+                          {/* Company links */}
+                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3 text-left">
+                            <span className="text-[10px] font-mono text-[#FF6B3D] font-bold block uppercase tracking-wider">Company Column Directory Links</span>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {footerCompanyLinks.map((link, idx) => (
+                                <div key={idx} className="flex gap-2 bg-white p-2 border border-slate-100 rounded-lg">
+                                  <input
+                                    type="text"
+                                    value={link.label}
+                                    placeholder="Label"
+                                    onChange={(e) => {
+                                      const updated = [...footerCompanyLinks];
+                                      updated[idx] = { ...updated[idx], label: e.target.value };
+                                      setFooterCompanyLinks(updated);
+                                    }}
+                                    className="w-1/2 border border-slate-200 px-2 py-1 text-xs font-bold rounded text-slate-800"
+                                  />
+                                  <select
+                                    value={link.url}
+                                    onChange={(e) => {
+                                      const updated = [...footerCompanyLinks];
+                                      updated[idx] = { ...updated[idx], url: e.target.value };
+                                      setFooterCompanyLinks(updated);
+                                    }}
+                                    className="w-1/2 border border-slate-200 px-2 py-1 text-xs rounded text-slate-800"
+                                  >
+                                    <option value="Home">Home Screen</option>
+                                    <option value="Properties">Properties Screen</option>
+                                    <option value="About">About Screen</option>
+                                    <option value="Contact">Contact Screen</option>
+                                    <option value="CustomRequest">Custom Property Request</option>
+                                  </select>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Services links */}
+                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3 text-left">
+                            <span className="text-[10px] font-mono text-[#FF6B3D] font-bold block uppercase tracking-wider">Services Column Directory Links</span>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {footerServicesLinks.map((link, idx) => (
+                                <div key={idx} className="flex gap-2 bg-white p-2 border border-slate-100 rounded-lg">
+                                  <input
+                                    type="text"
+                                    value={link.label}
+                                    placeholder="Label"
+                                    onChange={(e) => {
+                                      const updated = [...footerServicesLinks];
+                                      updated[idx] = { ...updated[idx], label: e.target.value };
+                                      setFooterServicesLinks(updated);
+                                    }}
+                                    className="w-1/2 border border-slate-200 px-2 py-1 text-xs font-bold rounded text-slate-800"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={link.url}
+                                    placeholder="URL or Tab Key"
+                                    onChange={(e) => {
+                                      const updated = [...footerServicesLinks];
+                                      updated[idx] = { ...updated[idx], url: e.target.value };
+                                      setFooterServicesLinks(updated);
+                                    }}
+                                    className="w-1/2 border border-slate-200 px-2 py-1 text-xs rounded text-slate-800"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+
+                        </div>
+                      </div>
+
+                      {/* Contact & Social media profiles */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
+                        <h4 className="font-bold text-slate-800 text-xs border-b border-slate-100 pb-2 uppercase tracking-wide">4. Contact Coordinates & Social Channels</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
+                          <div className="space-y-1 col-span-1 md:col-span-2">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Head Office Address</label>
+                            <input
+                              type="text"
+                              value={footerAddress}
+                              onChange={(e) => setFooterAddress(e.target.value)}
+                              placeholder="Address details..."
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Phone Number</label>
+                            <input
+                              type="text"
+                              value={footerPhone}
+                              onChange={(e) => setFooterPhone(e.target.value)}
+                              placeholder="+91..."
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Email Address</label>
+                            <input
+                              type="email"
+                              value={footerEmail}
+                              onChange={(e) => setFooterEmail(e.target.value)}
+                              placeholder="info@dvarix.com"
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Business Hours</label>
+                            <input
+                              type="text"
+                              value={footerBusinessHours}
+                              onChange={(e) => setFooterBusinessHours(e.target.value)}
+                              placeholder="Mon - Sat: 9:00 AM - 7:00 PM, Sunday: Closed"
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">WhatsApp Number</label>
+                            <input
+                              type="text"
+                              value={footerWhatsappNumber}
+                              onChange={(e) => setFooterWhatsappNumber(e.target.value)}
+                              placeholder="+91..."
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1 col-span-1 md:col-span-3">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Google Maps Location Link</label>
+                            <input
+                              type="text"
+                              value={footerGoogleMapsUrl}
+                              onChange={(e) => setFooterGoogleMapsUrl(e.target.value)}
+                              placeholder="https://maps.app.goo.gl/..."
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Social profiles list */}
+                        <div className="space-y-3 pt-2 text-left">
+                          <label className="font-extrabold text-slate-450 uppercase block text-[10px] border-t border-slate-50 pt-2">Social Profiles Directory</label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {footerSocials.map((social, idx) => (
+                              <div key={idx} className="flex gap-2 items-center bg-slate-50 p-2 border border-slate-100 rounded-xl">
+                                <span className="text-xs font-mono font-bold capitalize w-16 text-slate-500">{social.platform}</span>
+                                <input
+                                  type="text"
+                                  value={social.url}
+                                  placeholder="Profile Url"
+                                  onChange={(e) => {
+                                    const updated = [...footerSocials];
+                                    updated[idx] = { ...updated[idx], url: e.target.value };
+                                    setFooterSocials(updated);
+                                  }}
+                                  className="flex-1 border border-slate-200 px-2.5 py-1.5 text-xs rounded-lg text-slate-800 bg-white"
+                                />
+                                <input
+                                  type="checkbox"
+                                  checked={social.enabled}
+                                  onChange={(e) => {
+                                    const updated = [...footerSocials];
+                                    updated[idx] = { ...updated[idx], enabled: e.target.checked };
+                                    setFooterSocials(updated);
+                                  }}
+                                  className="rounded border-slate-300 text-[#FF6B3D] h-4 w-4 cursor-pointer"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Trust Cards Editor */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
+                        <h4 className="font-bold text-slate-800 text-xs border-b border-slate-100 pb-2 uppercase tracking-wide">5. Glass Trust Indicator Cards (Exactly 4 Cards)</h4>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {footerTrustCards.map((card, idx) => (
+                            <div key={card.id} className="p-4 bg-slate-50 border border-slate-150 rounded-2xl space-y-2.5 text-left">
+                              <div className="flex justify-between items-center border-b border-slate-100 pb-1.5">
+                                <span className="text-[10px] font-mono text-[#FF6B3D] font-bold uppercase">Trust Card {idx + 1}</span>
+                                <div className="space-y-1">
+                                  <select
+                                    value={card.icon}
+                                    onChange={(e) => {
+                                      const updated = [...footerTrustCards];
+                                      updated[idx] = { ...updated[idx], icon: e.target.value };
+                                      setFooterTrustCards(updated);
+                                    }}
+                                    className="border border-slate-200 p-1 rounded text-[10px] bg-white font-mono text-slate-800 cursor-pointer"
+                                  >
+                                    <option value="ShieldCheck">🛡️ ShieldCheck</option>
+                                    <option value="FileText">📄 FileText</option>
+                                    <option value="CheckCircle">✅ CheckCircle</option>
+                                    <option value="Compass">🧭 Compass</option>
+                                    <option value="Award">🏆 Award</option>
+                                  </select>
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-450 uppercase block">Card Title</label>
+                                <input
+                                  type="text"
+                                  value={card.title}
+                                  onChange={(e) => {
+                                    const updated = [...footerTrustCards];
+                                    updated[idx] = { ...updated[idx], title: e.target.value };
+                                    setFooterTrustCards(updated);
+                                  }}
+                                  className="w-full border border-slate-200 p-1.5 rounded-lg text-xs font-bold text-slate-800 bg-white"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-450 uppercase block">Card Description</label>
+                                <input
+                                  type="text"
+                                  value={card.description}
+                                  onChange={(e) => {
+                                    const updated = [...footerTrustCards];
+                                    updated[idx] = { ...updated[idx], description: e.target.value };
+                                    setFooterTrustCards(updated);
+                                  }}
+                                  className="w-full border border-slate-200 p-1.5 rounded-lg text-xs text-slate-800 bg-white"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Compliance & Bottom bar */}
+                      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
+                        <h4 className="font-bold text-slate-800 text-xs border-b border-slate-100 pb-2 uppercase tracking-wide">6. Bottom Bar & Legal compliance</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">Copyright Text</label>
+                            <input
+                              type="text"
+                              value={footerCopyrightText}
+                              onChange={(e) => setFooterCopyrightText(e.target.value)}
+                              placeholder="Dvarix Realty. All Rights Reserved."
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">RERA Badge Title</label>
+                            <input
+                              type="text"
+                              value={footerReraBadgeText}
+                              onChange={(e) => setFooterReraBadgeText(e.target.value)}
+                              placeholder="RERA Registered"
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="font-extrabold text-slate-450 uppercase block text-[10px]">RERA Badge Subtext</label>
+                            <input
+                              type="text"
+                              value={footerReraSubtext}
+                              onChange={(e) => setFooterReraSubtext(e.target.value)}
+                              placeholder="Real Estate Advisory Services"
+                              className="w-full border border-slate-205 p-2 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400 font-sans text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Interactive preview before saving */}
+                      <div className="bg-slate-950 p-6 rounded-3xl border border-slate-900 space-y-4 text-left">
+                        <div className="flex justify-between items-center border-b border-slate-900 pb-3">
+                          <span className="text-xs font-mono font-black text-[#FF6B3D] uppercase tracking-widest">✨ Live CMS Instant Preview</span>
+                          <span className="text-[10px] font-sans text-slate-500">How the live website footer currently appears</span>
+                        </div>
+                        
+                        <div className="p-1 rounded-2xl overflow-hidden scale-90 opacity-95 origin-top border border-slate-900 shadow-2xl bg-[#050B14]">
+                          <div className="py-6 px-4 md:px-8 space-y-8 text-left text-slate-400 text-xs">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                              <div className="space-y-3">
+                                <div className="text-white font-sans font-bold uppercase text-sm tracking-widest">{footerLogoText}</div>
+                                <p className="text-slate-400 text-[11px] leading-relaxed max-w-xs">{footerBrandDescription}</p>
+                              </div>
+                              <div className="space-y-2 col-span-1">
+                                <h4 className="text-[10px] font-bold tracking-wider text-white">COMPANY</h4>
+                                <ul className="space-y-1 text-slate-500 text-[11px]">
+                                  {footerCompanyLinks.slice(0, 3).map((l, i) => <li key={i}>{l.label}</li>)}
+                                </ul>
+                              </div>
+                              <div className="space-y-2 col-span-1">
+                                <h4 className="text-[10px] font-bold tracking-wider text-white">SERVICES</h4>
+                                <ul className="space-y-1 text-slate-500 text-[11px]">
+                                  {footerServicesLinks.slice(0, 3).map((l, i) => <li key={i}>{l.label}</li>)}
+                                </ul>
+                              </div>
+                              <div className="space-y-2 col-span-1">
+                                <h4 className="text-[10px] font-bold tracking-wider text-white">CONTACT</h4>
+                                <p className="text-[11px] text-slate-500 truncate">{footerAddress}</p>
+                                <p className="text-[11px] text-[#FF6B3D] font-semibold">{footerPhone}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Publish bottom bar */}
+                      <div className="flex justify-end pt-4">
+                        <button
+                          onClick={() => {
+                            const updatedConfig = {
+                              logoText: footerLogoText,
+                              brandDescription: footerBrandDescription,
+                              ctas: footerCtas,
+                              companyLinks: footerCompanyLinks,
+                              servicesLinks: footerServicesLinks,
+                              quickLinks: footerQuickLinks,
+                              address: footerAddress,
+                              phone: footerPhone,
+                              email: footerEmail,
+                              socials: footerSocials,
+                              trustCards: footerTrustCards,
+                              copyrightText: footerCopyrightText,
+                              reraBadgeText: footerReraBadgeText,
+                              reraSubtext: footerReraSubtext,
+                              enableSkyline: footerEnableSkyline,
+                              enableTrustStrip: footerEnableTrustStrip,
+                              showSocialIcons: footerShowSocialIcons,
+                              sectionOrder: footerSectionOrder,
+                              businessHours: footerBusinessHours,
+                              whatsappNumber: footerWhatsappNumber,
+                              googleMapsUrl: footerGoogleMapsUrl
+                            };
+                            const newSettings = {
+                              ...(siteSettings as SiteCMSConfig),
+                              footerConfig: updatedConfig
+                            };
+                            setSiteSettings?.(newSettings);
+                            firebaseService.saveSiteSettings(newSettings);
+                            
+                            window.dispatchEvent(new CustomEvent('cms-alert-notification', {
+                              detail: {
+                                title: "Footer Published",
+                                message: "The premium footer has been updated on the live website.",
+                                category: "Footer"
+                              }
+                            }));
+                          }}
+                          className="px-6 py-3 bg-gradient-to-r from-[#FF6B3D] to-[#FF5A3C] text-white hover:shadow-lg hover:shadow-[#FF6B3D]/25 font-bold rounded-xl transition cursor-pointer text-xs uppercase tracking-widest"
+                        >
+                          Save & Publish Footer Live
+                        </button>
                       </div>
                     </div>
                   )}

@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { 
   MapPin, Bed, Bath, Ruler, Star, ShieldCheck, TrendingUp, Sparkles, 
-  Building2, Calendar, User, DollarSign, Percent, Award, Compass 
+  Building2, Calendar, User, DollarSign, Percent, Award, Compass, Heart 
 } from 'lucide-react';
 import { Property, PropertyCardConfig, PropertyCardTemplate } from '../types';
 
@@ -162,20 +162,37 @@ export default function PropertyCard({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="bg-slate-50/50 border border-slate-200/80 rounded-2xl overflow-hidden hover:bg-white hover:border-sky-305 hover:shadow-lg transition-all duration-300 flex flex-col justify-between"
+          className="group bg-slate-50/50 border border-slate-200/80 rounded-2xl overflow-hidden hover:bg-white hover:border-sky-300 hover:shadow-lg transition-all duration-300 flex flex-col justify-between"
           id={`property-card-investment-${property.id}`}
         >
           <div>
-            <div className="relative h-44 bg-slate-105 overflow-hidden">
+            <div className="relative h-44 bg-slate-100 overflow-hidden">
               <img 
                 src={property.image} 
                 alt={property.title} 
-                className="w-full h-full object-cover group-hover:scale-105 transition duration-300" 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out" 
                 referrerPolicy="no-referrer"
               />
               <div className="absolute top-3 left-3 flex flex-col gap-1.5">
                 {renderTopBadge()}
               </div>
+
+              {onToggleFavorite && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite(property.id);
+                  }}
+                  className="absolute top-3 right-3 p-2 rounded-full bg-white/90 hover:bg-white backdrop-blur-xs text-slate-500 hover:text-rose-500 hover:scale-110 active:scale-95 transition-all duration-200 shadow-md cursor-pointer z-10 group/fav"
+                  aria-label={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                >
+                  <Heart 
+                    className={`h-4 w-4 transition-all duration-200 ${
+                      isFavorite ? 'fill-rose-500 text-rose-500 scale-105' : 'text-slate-600 group-hover/fav:text-rose-400'
+                    }`} 
+                  />
+                </button>
+              )}
 
               {activeConfig.showInvestmentScore && (
                 <div className="absolute bottom-3 left-3 bg-slate-900/90 text-white font-mono text-[10px] font-black px-2 py-1 rounded-md border border-slate-800 flex items-center gap-1 shadow-sm">
@@ -249,25 +266,42 @@ export default function PropertyCard({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="bg-white border border-slate-200 rounded-2xl overflow-hidden hover:border-sky-305 hover:shadow-lg transition-all duration-300 flex flex-col justify-between"
+          className="group bg-white border border-slate-200 rounded-2xl overflow-hidden hover:border-sky-300 hover:shadow-lg transition-all duration-300 flex flex-col justify-between"
           id={`property-card-commercial-${property.id}`}
         >
           <div>
-            <div className="relative h-44 bg-slate-105 overflow-hidden">
+            <div className="relative h-44 bg-slate-100 overflow-hidden">
               <img 
                 src={property.image} 
                 alt={property.title} 
-                className="w-full h-full object-cover" 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out" 
                 referrerPolicy="no-referrer"
               />
-              <div className="absolute top-3 left-3">
-                <span className="bg-slate-900 text-white font-mono font-bold text-[9px] uppercase tracking-wider px-2 py-0.5 rounded shadow">
+              <div className="absolute top-3 left-3 flex flex-col gap-1">
+                <span className="bg-slate-900 text-white font-mono font-bold text-[9px] uppercase tracking-wider px-2 py-0.5 rounded shadow self-start">
                   Corporate Asset
                 </span>
+                {renderTopBadge() && (
+                  <div className="self-start">{renderTopBadge()}</div>
+                )}
               </div>
-              <div className="absolute top-3 right-3">
-                {renderTopBadge()}
-              </div>
+              
+              {onToggleFavorite && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite(property.id);
+                  }}
+                  className="absolute top-3 right-3 p-2 rounded-full bg-white/90 hover:bg-white backdrop-blur-xs text-slate-500 hover:text-rose-500 hover:scale-110 active:scale-95 transition-all duration-200 shadow-md cursor-pointer z-10 group/fav"
+                  aria-label={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                >
+                  <Heart 
+                    className={`h-4 w-4 transition-all duration-200 ${
+                      isFavorite ? 'fill-rose-500 text-rose-500 scale-105' : 'text-slate-600 group-hover/fav:text-rose-400'
+                    }`} 
+                  />
+                </button>
+              )}
             </div>
 
             <div className="p-4 space-y-3.5 text-left">
@@ -327,23 +361,40 @@ export default function PropertyCard({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="bg-white border-2 border-slate-950/90 rounded-2xl overflow-hidden shadow-sm relative hover:shadow-2xl transition-all duration-400 flex flex-col justify-between"
+          className="group bg-white border-2 border-slate-950/90 rounded-2xl overflow-hidden shadow-sm relative hover:shadow-2xl transition-all duration-405 flex flex-col justify-between"
           id={`property-card-luxury-${property.id}`}
         >
           <div>
-            <div className="relative h-48 bg-slate-105 overflow-hidden">
+            <div className="relative h-48 bg-slate-100 overflow-hidden">
               <img 
                 src={property.image} 
                 alt={property.title} 
-                className="w-full h-full object-cover filter brightness-95" 
+                className="w-full h-full object-cover filter brightness-95 group-hover:scale-105 transition-transform duration-500 ease-out" 
                 referrerPolicy="no-referrer"
               />
               <div className="absolute top-3 left-3 bg-slate-950 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded shadow text-[9px] font-mono tracking-widest uppercase font-extrabold flex items-center gap-1.5">
                 <Compass className="h-3 w-3 text-amber-500 animate-spin-slow shrink-0" /> Premier Collection
               </div>
-              <div className="absolute bottom-3 right-3">
+              <div className="absolute bottom-3 left-3">
                 {renderTopBadge()}
               </div>
+
+              {onToggleFavorite && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite(property.id);
+                  }}
+                  className="absolute top-3 right-3 p-2 rounded-full bg-slate-950/80 hover:bg-slate-950 border border-slate-800 text-slate-300 hover:text-rose-500 hover:scale-110 active:scale-95 transition-all duration-200 shadow-md cursor-pointer z-10 group/fav"
+                  aria-label={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                >
+                  <Heart 
+                    className={`h-4 w-4 transition-all duration-200 ${
+                      isFavorite ? 'fill-rose-500 text-rose-500 scale-105' : 'text-slate-300 group-hover/fav:text-rose-400'
+                    }`} 
+                  />
+                </button>
+              )}
             </div>
 
             <div className="p-5 space-y-4 text-left">
@@ -399,23 +450,40 @@ export default function PropertyCard({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs hover:shadow-xl transition-all duration-350 flex flex-col justify-between"
+          className="group bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs hover:shadow-xl transition-all duration-350 flex flex-col justify-between"
           id={`property-card-modern-${property.id}`}
         >
           <div>
-            <div className="relative h-50 bg-slate-105 overflow-hidden">
+            <div className="relative h-50 bg-slate-100 overflow-hidden">
               <img 
                 src={property.image} 
                 alt={property.title} 
-                className="w-full h-full object-cover transform hover:scale-105 transition duration-500" 
+                className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-500 ease-out" 
                 referrerPolicy="no-referrer"
               />
               <div className="absolute top-3 left-3">
                 {renderTopBadge()}
               </div>
 
+              {onToggleFavorite && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite(property.id);
+                  }}
+                  className="absolute top-3 right-3 p-2 rounded-full bg-white/90 hover:bg-white backdrop-blur-xs text-slate-500 hover:text-rose-500 hover:scale-110 active:scale-95 transition-all duration-200 shadow-md cursor-pointer z-10 group/fav"
+                  aria-label={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                >
+                  <Heart 
+                    className={`h-4 w-4 transition-all duration-200 ${
+                      isFavorite ? 'fill-rose-500 text-rose-500 scale-105' : 'text-slate-600 group-hover/fav:text-rose-400'
+                    }`} 
+                  />
+                </button>
+              )}
+
               {activeConfig.showPrice && (
-                <div className="absolute bottom-3 right-3 bg-white border border-slate-100 px-3 py-1 rounded-xl shadow-md font-mono font-black text-sky-600 text-xs">
+                <div className="absolute bottom-3 left-3 bg-white border border-slate-100 px-3 py-1 rounded-xl shadow-md font-mono font-black text-[#ff5a3c] text-xs">
                   {formatCurrencyIndia(property.price)}
                 </div>
               )}
@@ -480,20 +548,38 @@ export default function PropertyCard({
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xs hover:shadow-lg transition-all duration-300 flex flex-col justify-between"
+          className="group bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xs hover:shadow-lg transition-all duration-300 flex flex-col justify-between"
           id={`property-card-default-${property.id}`}
         >
           <div>
-            <div className="relative h-48 bg-slate-105 overflow-hidden">
+            <div className="relative h-48 bg-slate-100 overflow-hidden">
               <img 
                 src={property.image} 
                 alt={property.title} 
-                className="w-full h-full object-cover hover:scale-103 transition duration-300" 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out" 
                 referrerPolicy="no-referrer"
               />
               <div className="absolute top-3 left-3 flex flex-col gap-1.5">
                 {renderTopBadge()}
               </div>
+
+              {onToggleFavorite && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite(property.id);
+                  }}
+                  className="absolute top-3 right-3 p-2 rounded-full bg-white/90 hover:bg-white backdrop-blur-xs text-slate-500 hover:text-rose-500 hover:scale-110 active:scale-95 transition-all duration-200 shadow-md cursor-pointer z-10 group/fav"
+                  aria-label={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                >
+                  <Heart 
+                    className={`h-4 w-4 transition-all duration-200 ${
+                      isFavorite ? 'fill-rose-500 text-rose-500 scale-105' : 'text-slate-600 group-hover/fav:text-rose-400'
+                    }`} 
+                  />
+                </button>
+              )}
+
               <div className="absolute bottom-3 right-3 flex gap-1.5">
                 {renderSecondaryBadge()}
               </div>

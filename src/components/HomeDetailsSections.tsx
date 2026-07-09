@@ -1,27 +1,120 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Building2, MapPin, Scale, Landmark, Compass, Briefcase, Warehouse, Key, TrendingUp, Hammer,
-  Star, ChevronRight, CheckCircle2, MessageSquare, ArrowRight, ShieldCheck, Mail, Sparkles, AlertCircle
+  Star, ChevronRight, CheckCircle2, MessageSquare, ArrowRight, ShieldCheck, Mail, Sparkles, AlertCircle,
+  Phone, Download, Globe
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { FAQ, SiteCMSConfig } from '../types';
+import StatisticsCounter from './StatisticsCounter';
+import CampaignRequestModal from './cms/CampaignRequestModal';
+import { firebaseService } from '../lib/firebaseService';
 
 interface HomeDetailsSectionsProps {
   onOpenCustomRequest: () => void;
   setActiveTab: (tab: any) => void;
   faqs?: FAQ[];
   siteSettings?: SiteCMSConfig;
+  onSelectArticleSlug?: (slug: string) => void;
 }
 
-export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab, faqs = [], siteSettings }: HomeDetailsSectionsProps) {
+export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab, faqs = [], siteSettings, onSelectArticleSlug }: HomeDetailsSectionsProps) {
   const [activeStep, setActiveStep] = useState(1);
   const [currentTestimonial, setCurrentTestimonial] = useState(0);
+  const [activeRequestCampaign, setActiveRequestCampaign] = useState<any | null>(null);
   
   // Website FAQ accordion section states
   const [expandedFaqId, setExpandedFaqId] = useState<string | null>(null);
   const [faqCategoryFilter, setFaqCategoryFilter] = useState<string>('All');
   const [faqSearchQuery, setFaqSearchQuery] = useState<string>('');
+
+  // Home FAQ configurations
+  const [faqLimit, setFaqLimit] = useState<number>(10);
+
+  // Auto-increment campaign views on load
+  useEffect(() => {
+    if (siteSettings?.offers) {
+      siteSettings.offers.filter(o => o.active).forEach(o => {
+        firebaseService.incrementCampaignServiceViews(o.id);
+      });
+    }
+  }, [siteSettings?.offers]);
+
+  // Click Action Handler
+  const handleCampaignAction = (offer: any, btn: any) => {
+    if (!btn || !btn.action) return;
+
+    // Increment click counts
+    firebaseService.incrementCampaignServiceClicks(offer.id);
+
+    const val = btn.value || '';
+    switch (btn.action) {
+      case 'Open Popup Form':
+      case 'Book Site Visit':
+        setActiveRequestCampaign(offer);
+        break;
+      case 'Open Internal Page':
+        if (val.startsWith('#')) {
+          const el = document.getElementById(val.replace('#', ''));
+          if (el) {
+            const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+            window.scrollTo({
+              top: elementPosition - 100,
+              behavior: 'smooth'
+            });
+          } else {
+            window.location.hash = val;
+          }
+        } else {
+          window.location.hash = val;
+        }
+        break;
+      case 'Open External URL':
+      case 'Download PDF':
+        if (val) window.open(val, '_blank');
+        break;
+      case 'WhatsApp':
+        const waText = encodeURIComponent(`Hello, I am interested in your campaign: "${offer.title}". Please share details.`);
+        window.open(`https://api.whatsapp.com/send?phone=${val.replace(/\s+/g, '')}&text=${waText}`, '_blank');
+        break;
+      case 'Phone Call':
+        window.location.href = `tel:${val.replace(/\s+/g, '')}`;
+        break;
+      case 'Email':
+        window.location.href = `mailto:${val}&subject=${encodeURIComponent(`Enquiry: ${offer.title}`)}`;
+        break;
+      case 'Property Search':
+        const searchEl = document.getElementById('search-panel') || document.getElementById('properties') || document.getElementById('listings-scroll-target');
+        if (searchEl) {
+          const elementPosition = searchEl.getBoundingClientRect().top + window.scrollY;
+          window.scrollTo({
+            top: elementPosition - 100,
+            behavior: 'smooth'
+          });
+        } else {
+          window.location.hash = '#search';
+        }
+        break;
+      default:
+        break;
+    }
+  };
+
+  // Synchronize category filter with default category from settings on load
+  useEffect(() => {
+    if (siteSettings?.faqSettings?.defaultCategory) {
+      const cat = siteSettings.faqSettings.defaultCategory;
+      setFaqCategoryFilter(cat === 'General' ? 'General Questions' : cat);
+    }
+  }, [siteSettings?.faqSettings?.defaultCategory]);
+
+  // Synchronize display count limit
+  useEffect(() => {
+    if (siteSettings?.faqSettings?.maxFaqsToDisplay) {
+      setFaqLimit(Number(siteSettings.faqSettings.maxFaqsToDisplay));
+    }
+  }, [siteSettings?.faqSettings?.maxFaqsToDisplay]);
 
   // Auto scroll testimonials
   useEffect(() => {
@@ -31,34 +124,70 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
     return () => clearInterval(timer);
   }, []);
 
+  const homepageBlogs = React.useMemo(() => {
+    if (!siteSettings?.blogs) return [];
+    
+    // Filter only published blogs
+    const published = siteSettings.blogs.filter(b => {
+      if (b.status) {
+        return b.status === 'Published';
+      }
+      return b.published === true;
+    });
+
+    // Sort: featured first, then displayOrder ascending, then date descending
+    const sorted = [...published].sort((a, b) => {
+      const aFeatured = a.featured ? 1 : 0;
+      const bFeatured = b.featured ? 1 : 0;
+      if (aFeatured !== bFeatured) {
+        return bFeatured - aFeatured; // Featured first
+      }
+      
+      const aOrder = a.displayOrder !== undefined ? Number(a.displayOrder) : 9999;
+      const bOrder = b.displayOrder !== undefined ? Number(b.displayOrder) : 9999;
+      if (aOrder !== bOrder) {
+        return aOrder - bOrder; // Lower order first
+      }
+
+      // Date sort
+      const aDate = new Date(a.publishDate || a.date || 0).getTime();
+      const bDate = new Date(b.publishDate || b.date || 0).getTime();
+      return bDate - aDate;
+    });
+
+    // Limit to maxArticles
+    const maxArticles = siteSettings.blogSettings?.maxArticles !== undefined ? Number(siteSettings.blogSettings.maxArticles) : 6;
+    return sorted.slice(0, maxArticles);
+  }, [siteSettings?.blogs, siteSettings?.blogSettings?.maxArticles]);
+
   const staticFeatures = [
     {
-      title: 'Requirement-Based Property Search',
-      description: 'We do not flood you with random listings. We hunt down only the properties that match your specific checklists.'
+      title: 'Requirement-Based Sourcing',
+      description: 'Every property search begins with your requirements. We carefully understand your location, budget, lifestyle, and investment goals before presenting handpicked opportunities.'
     },
     {
-      title: 'Personalized Recommendations',
-      description: 'Your goals are unique. Acquire customized property portfolios aligned to your business or home aspirations.'
+      title: 'Commercial & Industrial Advisory',
+      description: 'Comprehensive advisory for office spaces, retail outlets, warehouses, industrial assets, and commercial investments across Bengaluru\'s key growth corridors.'
     },
     {
-      title: 'Residential & Commercial Expertise',
-      description: 'Whether it is modern family duplexes or high-capacity logistics warehouses, our advisors possess elite market expertise.'
+      title: 'Land & Plot Acquisition',
+      description: 'Verified residential plots, villa communities, farm lands, and investment parcels with complete legal due diligence and transparent documentation.'
     },
     {
-      title: 'Investment Guidance',
-      description: 'Deep analytical capital research ensures high yield ROI metrics and reliable long-term secure equity hedging.'
+      title: 'Legal Verification & Compliance',
+      description: 'Every recommended property is reviewed for title clarity, approvals, EC, Khata, RERA compliance, and essential legal documentation wherever applicable.'
     },
     {
-      title: 'Market Research & Property Sourcing',
-      description: 'We directly cross-reference off-market landowners, builder records, and sovereign parcels to locate prime areas.'
+      title: 'Home Loan & Financial Assistance',
+      description: 'Simplifying home financing through trusted banking partners, competitive interest rates, and end-to-end loan processing support.'
     },
     {
-      title: 'End-to-End Assistance',
-      description: 'From initial parameters mapping to bank integrations and key handovers, we handle every logistics barrier.'
+      title: 'End-to-End Property Assistance',
+      description: 'From consultation and property discovery to registration and after-sales support, Dvarix Realty stands by you throughout your real estate journey.'
     }
   ];
 
-  const features = siteSettings?.services || staticFeatures;
+  const features = staticFeatures;
 
   const steps = [
     {
@@ -144,10 +273,10 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
   const repeatedBottomPartners = [...bottomRowPartners, ...bottomRowPartners, ...bottomRowPartners, ...bottomRowPartners];
 
   return (
-    <div className="bg-slate-950 text-slate-100 space-y-28 pb-16 overflow-hidden" id="details-section-group">
+    <div className="bg-slate-950 text-slate-100 pb-16 overflow-hidden" id="details-section-group">
       
       {/* 1. WHY CHOOSE DVARIX REALTY */}
-      <section className="py-24 relative border-t border-slate-900/60 bg-gradient-to-b from-slate-950 to-slate-900/40" id="why-choose-section">
+      <section className="py-20 relative border-t border-slate-900/60 bg-gradient-to-b from-slate-950 to-slate-900/40" id="why-choose-section">
         {/* Decorative backdrop glows */}
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-[#ff5a3c]/3 rounded-full blur-[120px] pointer-events-none" />
         
@@ -173,7 +302,7 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
                 </span>
               </h2>
               <p className="text-slate-300 text-sm sm:text-base leading-relaxed font-normal">
-                Unlike traditional real estate platforms that focus on listings, Dvarix Realty focuses on people. We start by understanding your requirements and then actively search for suitable opportunities that match your location, budget, goals, and preferences.
+                Your property journey deserves more than endless listings. At Dvarix Realty, we understand your requirements first and present carefully verified opportunities tailored to your lifestyle, budget, and investment goals.
               </p>
 
               {/* Physical Office Placement Callout */}
@@ -220,8 +349,14 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
         </div>
       </section>
 
+      {/* Statistics Section */}
+      <StatisticsCounter 
+        cards={siteSettings?.statisticsCards} 
+        settings={siteSettings?.statisticsSettings} 
+      />
+
       {/* 2. HOW IT WORKS */}
-      <section className="py-12 relative" id="how-it-works-section">
+      <section className="py-20 relative" id="how-it-works-section">
         {/* Background visual graphics */}
         <div className="absolute right-0 top-1/3 w-64 h-64 bg-cyan-500/2 rounded-full blur-[90px] pointer-events-none" />
         
@@ -301,7 +436,7 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
       </section>
 
       {/* 3. CLIENT TESTIMONIALS */}
-      <section className="py-24 bg-slate-900/20 relative border-t border-b border-slate-900/60" id="testimonials-section">
+      <section className="py-20 bg-slate-900/20 relative border-t border-b border-slate-900/60" id="testimonials-section">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(255,90,60,0.015)_0%,transparent_60%)]" />
         
         <div className="max-w-4xl mx-auto px-4 sm:px-6 relative z-10 text-center">
@@ -394,7 +529,7 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
       </section>
 
       {/* 4. OUR TRUSTED NETWORK (PREMIUM SCROLLING BRAND MARQUEE) */}
-      <section className="py-24 relative overflow-hidden bg-slate-950 text-center" id="trusted-network-scoller">
+      <section className="py-20 relative overflow-hidden bg-slate-950 text-center" id="trusted-network-scoller">
         
         {/* Style Tag Injecting CSS Keyframe Marquees */}
         <style dangerouslySetInnerHTML={{__html: `
@@ -526,165 +661,213 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
       </section>
 
       {/* 4.5 enterprise public FAQ accordion portal */}
-      <section className="py-24 relative border-t border-slate-900/60 bg-gradient-to-b from-slate-900/40 to-slate-950" id="website-faq-portal-section">
-        {/* Ambient radial lighting overlays */}
-        <div className="absolute top-1/3 left-1/4 w-80 h-80 bg-sky-500/3 rounded-full blur-[100px] pointer-events-none" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-[#ff5a3c]/3 rounded-full blur-[120px] pointer-events-none" />
+      {siteSettings?.faqSettings?.enableHomepageFAQSection !== false && (
+        <section className="py-20 relative border-t border-slate-900/60 bg-gradient-to-b from-slate-900/40 to-slate-950" id="website-faq-portal-section">
+          {/* Ambient radial lighting overlays */}
+          <div className="absolute top-1/3 left-1/4 w-80 h-80 bg-sky-500/3 rounded-full blur-[100px] pointer-events-none" />
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-[#ff5a3c]/3 rounded-full blur-[120px] pointer-events-none" />
 
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 relative z-10">
-          
-          {/* FAQ Headers */}
-          <motion.div 
-            initial={{ opacity: 0, y: 25 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-100px" }}
-            transition={{ duration: 0.6 }}
-            className="text-center space-y-3 mb-12"
-          >
-            <span className="text-[10px] uppercase font-mono tracking-widest text-[#ff5a3c] font-black bg-[#ff5a3c]/10 px-2.5 py-1 rounded-md text-orange-400 border border-[#ff5a3c]/20">
-              knowledge base & support
-            </span>
-            <h2 className="text-3xl sm:text-4.5xl font-sans font-black tracking-tight text-white">
-              Frequently Asked Questions
-            </h2>
-            <p className="text-slate-400 text-xs sm:text-sm max-w-xl mx-auto font-light leading-relaxed">
-              Find transparent answers about our requirement-driven platform, scheduling site walkthroughs, and Bangalore real estate investments.
-            </p>
-            <div className="w-12 h-1 bg-gradient-to-r from-[#ff5a3c] to-amber-500 mx-auto rounded-full mt-3"></div>
-          </motion.div>
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 relative z-10">
+            
+            {/* FAQ Headers */}
+            <motion.div 
+              initial={{ opacity: 0, y: 25 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ duration: 0.6 }}
+              className="text-center space-y-3 mb-12"
+            >
+              <span className="text-[10px] uppercase font-mono tracking-widest text-[#ff5a3c] font-black bg-[#ff5a3c]/10 px-2.5 py-1 rounded-md text-orange-400 border border-[#ff5a3c]/20">
+                knowledge base & support
+              </span>
+              <h2 className="text-3xl sm:text-4.5xl font-sans font-black tracking-tight text-white">
+                Frequently Asked Questions
+              </h2>
+              <p className="text-slate-400 text-xs sm:text-sm max-w-xl mx-auto font-light leading-relaxed">
+                Find transparent answers about our requirement-driven platform, scheduling site walkthroughs, and Bangalore real estate investments.
+              </p>
+              <div className="w-12 h-1 bg-gradient-to-r from-[#ff5a3c] to-amber-500 mx-auto rounded-full mt-3"></div>
+            </motion.div>
 
-          {/* Search and Category Filters */}
-          <div className="space-y-6 mb-10">
-            {/* Direct Input Search widget */}
-            <div className="relative max-w-lg mx-auto">
-              <input 
-                type="text"
-                placeholder="Search queries, legal compliance, timelines..."
-                value={faqSearchQuery}
-                onChange={(e) => setFaqSearchQuery(e.target.value)}
-                className="w-full bg-slate-900/80 border border-slate-800 text-slate-100 text-xs rounded-xl pl-10 pr-4 py-3 placeholder-slate-500 outline-none focus:border-[#ff5a3c]/50 transition duration-150"
-              />
-              <div className="absolute left-3.5 top-3 text-slate-505 select-none touch-none">
-                🔍
+            {/* Search and Category Filters */}
+            <div className="space-y-6 mb-10">
+              {/* Direct Input Search widget */}
+              <div className="relative max-w-lg mx-auto">
+                <input 
+                  type="text"
+                  placeholder="Search queries, legal compliance, timelines..."
+                  value={faqSearchQuery}
+                  onChange={(e) => setFaqSearchQuery(e.target.value)}
+                  className="w-full bg-slate-900/80 border border-slate-800 text-slate-100 text-xs rounded-xl pl-10 pr-4 py-3 placeholder-slate-500 outline-none focus:border-[#ff5a3c]/50 transition duration-150"
+                />
+                <div className="absolute left-3.5 top-3 text-slate-505 select-none touch-none">
+                  🔍
+                </div>
+                {faqSearchQuery && (
+                  <button 
+                    onClick={() => setFaqSearchQuery('')}
+                    className="absolute right-3 top-3 text-xs text-slate-400 hover:text-white"
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
-              {faqSearchQuery && (
-                <button 
-                  onClick={() => setFaqSearchQuery('')}
-                  className="absolute right-3 top-3 text-xs text-slate-400 hover:text-white"
-                >
-                  Clear
-                </button>
+
+              {/* Quick Categories filter tags */}
+              {siteSettings?.faqSettings?.showCategoryNavigation !== false && (
+                <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-2xl mx-auto">
+                  {['All', 'General Questions', 'Property Search', 'Requirements', 'Site Visits', 'Buying Process', 'Investment']
+                    .filter(cat => {
+                      if (cat === 'All' && siteSettings?.faqSettings?.showAllCategory === false) return false;
+                      return true;
+                    })
+                    .map((cat) => {
+                      const isActive = faqCategoryFilter === cat;
+                      return (
+                        <button
+                          key={cat}
+                          onClick={() => {
+                            setFaqCategoryFilter(cat);
+                            setExpandedFaqId(null);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest font-black border transition cursor-pointer ${
+                            isActive 
+                              ? 'bg-[#ff5a3c] border-[#ff5a3c] text-white' 
+                              : 'bg-slate-900/40 border-slate-850 text-slate-400 hover:bg-slate-950 hover:text-white'
+                          }`}
+                        >
+                          {cat === 'General Questions' ? 'General' : cat}
+                        </button>
+                      );
+                    })}
+                </div>
               )}
             </div>
 
-            {/* Quick Categories filter tags */}
-            <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-2xl mx-auto">
-              {['All', 'General Questions', 'Property Search', 'Requirements', 'Site Visits', 'Buying Process', 'Investment'].map((cat) => {
-                const isActive = faqCategoryFilter === cat;
+            {/* Filtered active published FAQ accordions list */}
+            <div className="space-y-4">
+              {(() => {
+                const activePublishedFaqs = faqs.filter(faq => {
+                  if (faq.status === 'Draft' || faq.status === 'Hidden' || faq.published === false) return false; // Hide non-published FAQs completely from website
+                  if (faq.showOnHomepage === false || faq.homepageVisible === false) return false; // Only show FAQ if marked for homepage
+                  if (siteSettings?.faqSettings?.displayOnlyFeatured && !faq.featured) return false; // Filter featured only
+
+                  const matchSearch = faq.question.toLowerCase().includes(faqSearchQuery.toLowerCase()) || 
+                                      faq.answer.toLowerCase().includes(faqSearchQuery.toLowerCase());
+                  const matchCategory = faqCategoryFilter === 'All' || 
+                                        faq.category === faqCategoryFilter ||
+                                        (faqCategoryFilter === 'General Questions' && faq.category === 'General') ||
+                                        (faqCategoryFilter === 'General' && faq.category === 'General Questions');
+                  return matchSearch && matchCategory;
+                }).sort((a, b) => {
+                  const orderA = a.homepageOrder !== undefined ? a.homepageOrder : a.displayOrder;
+                  const orderB = b.homepageOrder !== undefined ? b.homepageOrder : b.displayOrder;
+                  return orderA - orderB;
+                });
+
+                if (activePublishedFaqs.length === 0) {
+                  return (
+                    <div className="text-center py-10 bg-slate-900/10 border border-slate-900 rounded-2xl space-y-2">
+                      <p className="text-slate-500 font-mono text-xs">No matching articles found in index.</p>
+                      <p className="text-[10px] text-slate-600">Please refine searching keywords or request secondary assistance below.</p>
+                    </div>
+                  );
+                }
+
+                const displayedFaqs = activePublishedFaqs.slice(0, faqLimit);
+
                 return (
-                  <button
-                    key={cat}
-                    onClick={() => {
-                      setFaqCategoryFilter(cat);
-                      setExpandedFaqId(null);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest font-black border transition cursor-pointer ${
-                      isActive 
-                        ? 'bg-[#ff5a3c] border-[#ff5a3c] text-white' 
-                        : 'bg-slate-900/40 border-slate-850 text-slate-400 hover:bg-slate-950 hover:text-white'
-                    }`}
-                  >
-                    {cat === 'General Questions' ? 'General' : cat}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Filtered active published FAQ accordions list */}
-          <div className="space-y-4">
-            {(() => {
-              const activePublishedFaqs = faqs.filter(faq => {
-                if (faq.status === 'Draft') return false; // Hide draft FAQs completely from website
-                const matchSearch = faq.question.toLowerCase().includes(faqSearchQuery.toLowerCase()) || 
-                                    faq.answer.toLowerCase().includes(faqSearchQuery.toLowerCase());
-                const matchCategory = faqCategoryFilter === 'All' || faq.category === faqCategoryFilter;
-                return matchSearch && matchCategory;
-              });
-
-              if (activePublishedFaqs.length === 0) {
-                return (
-                  <div className="text-center py-10 bg-slate-900/10 border border-slate-900 rounded-2xl space-y-2">
-                    <p className="text-slate-500 font-mono text-xs">No matching articles found in index.</p>
-                    <p className="text-[10px] text-slate-600">Please refine searching keywords or request secondary assistance below.</p>
-                  </div>
-                );
-              }
-
-              return activePublishedFaqs.map((faq) => {
-                const isExpanded = expandedFaqId === faq.id;
-                
-                return (
-                  <motion.div
-                    key={faq.id}
-                    layout="position"
-                    className={`border rounded-2xl overflow-hidden transition-all duration-300 ${
-                      isExpanded 
-                        ? 'border-[#ff5a3c]/30 bg-slate-900/75 shadow-xl' 
-                        : 'border-slate-850/80 bg-slate-900/15 hover:bg-slate-900/40 hover:border-slate-800'
-                    }`}
-                  >
-                    {/* Header trigger button */}
-                    <button
-                      onClick={() => setExpandedFaqId(isExpanded ? null : faq.id)}
-                      className="w-full p-5 flex items-center justify-between text-left focus:outline-none cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2.5 pr-4">
-                        {faq.featured && (
-                          <span className="inline-block" title="Featured priority article">
-                            ⭐
-                          </span>
-                        )}
-                        <span className="text-xs sm:text-sm font-extrabold text-white leading-snug">
-                          {faq.question}
-                        </span>
-                      </div>
-                      <span className={`text-xs ml-2 text-slate-400 shrink-0 transition-transform duration-300 ${
-                        isExpanded ? 'rotate-180 text-[#ff5a3c]' : ''
-                      }`}>
-                        ▼
-                      </span>
-                    </button>
-
-                    {/* Expandable answer panel */}
-                    <AnimatePresence initial={false}>
-                      {isExpanded && (
+                  <>
+                    {displayedFaqs.map((faq, idx) => {
+                      const isExpanded = expandedFaqId === faq.id;
+                      
+                      return (
                         <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.25, ease: "easeInOut" }}
-                          className="border-t border-slate-900 bg-slate-950/20 text-slate-300"
+                          key={faq.id}
+                          layout="position"
+                          initial={{ opacity: 0, y: 15 }}
+                          whileInView={{ opacity: 1, y: 0 }}
+                          viewport={{ once: true, margin: "-50px" }}
+                          transition={{ duration: 0.5, delay: idx * 0.05 }}
+                          className={`border rounded-2xl overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:border-[#ff5a3c]/40 cursor-pointer ${
+                            isExpanded 
+                              ? 'border-[#ff5a3c]/30 bg-slate-900/90 shadow-xl border-l-4 border-l-[#ff5a3c]' 
+                              : 'border-slate-850/80 bg-slate-900/15 hover:bg-slate-900/40 hover:border-slate-800'
+                          }`}
                         >
-                          <p className="p-5 text-[#c2cbd8] text-xs leading-relaxed font-light">
-                            {faq.answer}
-                          </p>
+                          {/* Header trigger button */}
+                          <button
+                            onClick={() => setExpandedFaqId(isExpanded ? null : faq.id)}
+                            className="w-full p-5 flex items-center justify-between text-left focus:outline-none cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2.5 pr-4">
+                              {faq.featured && (
+                                <span className="inline-block" title="Featured priority article">
+                                  ⭐
+                                </span>
+                              )}
+                              <span className="text-xs sm:text-sm font-extrabold text-white leading-snug">
+                                {faq.question}
+                              </span>
+                            </div>
+                            <span className={`text-xs ml-2 text-slate-400 shrink-0 transition-transform duration-300 ${
+                              isExpanded ? 'rotate-180 text-[#ff5a3c]' : ''
+                            }`}>
+                              ▼
+                            </span>
+                          </button>
+
+                          {/* Expandable answer panel */}
+                          <AnimatePresence initial={false}>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                                className="border-t border-slate-900 bg-slate-950/20 text-slate-300"
+                              >
+                                <motion.div
+                                  initial={{ y: -8, opacity: 0 }}
+                                  animate={{ y: 0, opacity: 1 }}
+                                  exit={{ y: -8, opacity: 0 }}
+                                  transition={{ duration: 0.3, delay: 0.05 }}
+                                >
+                                  <p className="p-5 text-[#c2cbd8] text-xs leading-relaxed font-light">
+                                    {faq.answer}
+                                  </p>
+                                </motion.div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+
                         </motion.div>
-                      )}
-                    </AnimatePresence>
+                      );
+                    })}
 
-                  </motion.div>
+                    {/* View All FAQs expanded action */}
+                    {siteSettings?.faqSettings?.enableViewAllButton !== false && activePublishedFaqs.length > faqLimit && (
+                      <div className="text-center pt-6">
+                        <button
+                          onClick={() => setFaqLimit(999)}
+                          className="px-6 py-3 border border-[#ff5a3c]/30 hover:border-[#ff5a3c] text-slate-100 text-xs uppercase tracking-wider font-bold rounded-xl bg-slate-900/60 hover:bg-[#ff5a3c] transition duration-200 cursor-pointer shadow-md hover:shadow-[#ff5a3c]/20"
+                        >
+                          View All FAQs ({activePublishedFaqs.length})
+                        </button>
+                      </div>
+                    )}
+                  </>
                 );
-              });
-            })()}
-          </div>
+              })()}
+            </div>
 
-        </div>
-      </section>
+          </div>
+        </section>
+      )}
 
       {/* 4b. EXCLUSIVE OFFERS & CAMPAIGNS (DYNAMIC CMS SECTION) */}
       {siteSettings?.offers && siteSettings.offers.filter(o => o.active).length > 0 && (
-        <section className="py-24 bg-slate-900/10 relative border-t border-slate-900/60" id="cms-offers-campaigns-section">
+        <section className="py-20 bg-slate-900/10 relative border-t border-slate-900/60" id="cms-offers-campaigns-section">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_right,rgba(255,90,60,0.012)_0%,transparent_50%)]" />
           <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10">
             <motion.div 
@@ -726,7 +909,7 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
                       </div>
                     </div>
                   )}
-                  <div className="p-6 space-y-4 flex-1 flex flex-col justify-between">
+                   <div className="p-6 space-y-4 flex-1 flex flex-col justify-between">
                     <div className="space-y-2">
                       {!offer.image && (
                         <div className="inline-block bg-[#ff5a3c]/10 text-[#ff5a3c] text-[10px] uppercase font-mono font-black px-2.5 py-1 rounded border border-[#ff5a3c]/25">
@@ -736,6 +919,57 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
                       <h3 className="text-lg font-sans font-black text-white tracking-tight">{offer.title}</h3>
                       <p className="text-xs text-slate-400 leading-relaxed font-light">{offer.description}</p>
                     </div>
+
+                    {/* Interactive Action Buttons */}
+                    <div className="space-y-2.5 pt-2">
+                      {offer.button1?.text && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCampaignAction(offer, offer.button1);
+                          }}
+                          className="w-full py-2.5 bg-[#ff5a3c] hover:bg-[#e04326] text-white text-xs font-black rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer border border-[#ff5a3c]"
+                        >
+                          {offer.button1.icon === 'Phone' && <Phone className="h-3.5 w-3.5" />}
+                          {offer.button1.icon === 'MessageSquare' && <MessageSquare className="h-3.5 w-3.5" />}
+                          {offer.button1.icon === 'Mail' && <Mail className="h-3.5 w-3.5" />}
+                          {offer.button1.icon === 'Download' && <Download className="h-3.5 w-3.5" />}
+                          {offer.button1.icon === 'Globe' && <Globe className="h-3.5 w-3.5" />}
+                          {offer.button1.text}
+                        </button>
+                      )}
+
+                      {offer.button2?.text && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCampaignAction(offer, offer.button2);
+                          }}
+                          className="w-full py-2.5 bg-transparent hover:bg-white/5 border border-white/20 hover:border-white/45 text-white text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          {offer.button2.icon === 'Phone' && <Phone className="h-3.5 w-3.5" />}
+                          {offer.button2.icon === 'MessageSquare' && <MessageSquare className="h-3.5 w-3.5" />}
+                          {offer.button2.icon === 'Mail' && <Mail className="h-3.5 w-3.5" />}
+                          {offer.button2.icon === 'Download' && <Download className="h-3.5 w-3.5" />}
+                          {offer.button2.icon === 'Globe' && <Globe className="h-3.5 w-3.5" />}
+                          {offer.button2.text}
+                        </button>
+                      )}
+
+                      {!offer.button1?.text && !offer.button2?.text && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCampaignAction(offer, { text: 'Enquire Now', action: 'Open Popup Form' });
+                          }}
+                          className="w-full py-2.5 bg-[#ff5a3c] hover:bg-[#e04326] text-white text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-[#ff5a3c]"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          Enquire Now
+                        </button>
+                      )}
+                    </div>
+
                     {offer.validTill && (
                       <div className="text-[10px] font-mono text-slate-500 border-t border-slate-900/60 pt-3 flex items-center justify-between">
                         <span>VALID TILL:</span>
@@ -751,8 +985,8 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
       )}
 
       {/* 4c. LATEST INSIGHTS & BLOGS (DYNAMIC CMS SECTION) */}
-      {siteSettings?.blogs && siteSettings.blogs.filter(b => b.published).length > 0 && (
-        <section className="py-24 bg-slate-950 relative border-t border-slate-900/60" id="cms-blog-insights-section">
+      {siteSettings?.blogSettings?.showSection !== false && homepageBlogs.length > 0 && (
+        <section className="py-20 bg-slate-950 relative border-t border-slate-900/60" id="cms-blog-insights-section">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-96 bg-[radial-gradient(circle_at_center,rgba(255,90,60,0.01)_0%,transparent_70%)] pointer-events-none" />
           <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10">
             <motion.div 
@@ -772,54 +1006,76 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
             </motion.div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {siteSettings.blogs.filter(b => b.published).map((blog, idx) => (
-                <motion.div
-                  key={blog.id || idx}
-                  initial={{ opacity: 0, y: 30 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: idx * 0.12 }}
-                  className="bg-slate-900/20 border border-slate-900/60 rounded-2xl p-6 hover:border-slate-800 transition-all duration-300 flex flex-col md:flex-row gap-6 group"
-                >
-                  {blog.image && (
-                    <div className="w-full md:w-40 h-40 md:h-full min-h-[140px] rounded-xl overflow-hidden relative flex-shrink-0">
-                      <img 
-                        src={blog.image} 
-                        alt={blog.title} 
-                        className="w-full h-full object-cover group-hover:scale-105 transition-all duration-500 filter brightness-90"
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-                  )}
-                  <div className="flex-1 flex flex-col justify-between space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
-                        <span>{blog.date}</span>
-                        <span>•</span>
-                        <span>BY {blog.author.toUpperCase()}</span>
+              {homepageBlogs.map((blog, idx) => {
+                const imageUrl = blog.featuredImage || blog.image;
+                const displayDate = blog.publishDate || blog.date;
+                const displaySummary = blog.summary || blog.excerpt;
+                return (
+                  <motion.div
+                    key={blog.id || idx}
+                    initial={{ opacity: 0, y: 30 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.5, delay: idx * 0.12 }}
+                    onClick={() => onSelectArticleSlug?.(blog.slug || blog.id)}
+                    className="bg-slate-900/20 border border-slate-900/60 rounded-2xl p-6 hover:border-slate-800 hover:bg-slate-900/30 cursor-pointer transition-all duration-300 flex flex-col md:flex-row gap-6 group"
+                  >
+                    {imageUrl && (
+                      <div className="w-full md:w-40 h-40 md:h-full min-h-[140px] rounded-xl overflow-hidden relative flex-shrink-0">
+                        <img 
+                          src={imageUrl} 
+                          alt={blog.title} 
+                          className="w-full h-full object-cover group-hover:scale-105 transition-all duration-500 filter brightness-90"
+                          referrerPolicy="no-referrer"
+                        />
                       </div>
-                      <h3 className="text-base font-sans font-black text-white tracking-tight group-hover:text-[#ff5a3c] transition-colors">
-                        {blog.title}
-                      </h3>
-                      <p className="text-xs text-slate-450 leading-relaxed font-light line-clamp-3">
-                        {blog.excerpt}
-                      </p>
+                    )}
+                    <div className="flex-1 flex flex-col justify-between space-y-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-[10px] font-mono text-slate-500">
+                          <span>{displayDate}</span>
+                          <span>•</span>
+                          <span>BY {blog.author ? blog.author.toUpperCase() : 'ADVISORS BOARD'}</span>
+                          {blog.category && (
+                            <>
+                              <span>•</span>
+                              <span className="text-[#ff5a3c] uppercase">{blog.category}</span>
+                            </>
+                          )}
+                          {blog.featured && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[9px] ml-auto uppercase font-black tracking-tight">
+                              Featured
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="text-base font-sans font-black text-white tracking-tight group-hover:text-[#ff5a3c] transition-colors line-clamp-2">
+                          {blog.title}
+                        </h3>
+                        <p className="text-xs text-slate-400 leading-relaxed font-light line-clamp-3">
+                          {displaySummary}
+                        </p>
+                      </div>
+                      <div className="pt-2 border-t border-slate-900/60 flex items-center justify-between">
+                        <span className="text-[10px] font-mono text-[#ff5a3c] uppercase tracking-wider font-black group-hover:underline flex items-center gap-1">
+                          Read Full Brief <ArrowRight className="w-3 h-3" />
+                        </span>
+                        {blog.readingTime && (
+                          <span className="text-[10px] font-mono text-slate-500">
+                            {blog.readingTime}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="pt-2 border-t border-slate-900/60 flex items-center justify-between">
-                      <span className="text-[10px] font-mono text-[#ff5a3c] uppercase tracking-wider font-black">
-                        knowledge base brief
-                      </span>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                );
+              })}
             </div>
           </div>
         </section>
       )}
 
       {/* 5. READY TO FIND THE RIGHT PROPERTY? (CTA SECTION) */}
-      <section className="py-24 relative overflow-hidden text-center border-t border-slate-900/80 bg-gradient-to-r from-red-950/20 via-slate-950 to-slate-950" id="ready-cta-section">
+      <section className="py-20 relative overflow-hidden text-center border-t border-slate-900/80 bg-gradient-to-r from-red-950/20 via-slate-950 to-slate-950" id="ready-cta-section">
         {/* Floating gradient shapes */}
         <div className="absolute top-0 left-1/4 w-72 h-72 bg-[#ff5a3c]/4 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-cyan-500/3 rounded-full blur-[120px] pointer-events-none" />
@@ -872,6 +1128,13 @@ export default function HomeDetailsSections({ onOpenCustomRequest, setActiveTab,
 
         </motion.div>
       </section>
+
+      {/* Campaign Dynamic Request Modal Overlay */}
+      <CampaignRequestModal
+        campaign={activeRequestCampaign}
+        isOpen={activeRequestCampaign !== null}
+        onClose={() => setActiveRequestCampaign(null)}
+      />
 
     </div>
   );

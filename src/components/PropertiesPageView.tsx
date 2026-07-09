@@ -8,7 +8,8 @@ import {
   DollarSign, HelpCircle, ChevronLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Property, SearchCategory } from '../types';
+import { Property, SearchCategory, SiteCMSConfig, BannerButtonConfig, HeroBanner } from '../types';
+import LuxuryHeroCarousel from './LuxuryHeroCarousel';
 
 interface PropertiesPageViewProps {
   properties: Property[];
@@ -19,6 +20,8 @@ interface PropertiesPageViewProps {
   onOpenSiteVisit: () => void;
   setBookingTargetProperty: (property: Property | null) => void;
   searchCategories: SearchCategory[];
+  siteSettings?: SiteCMSConfig;
+  heroBanners?: HeroBanner[];
 }
 
 export default function PropertiesPageView({
@@ -29,7 +32,9 @@ export default function PropertiesPageView({
   onOpenCustomRequest,
   onOpenSiteVisit,
   setBookingTargetProperty,
-  searchCategories = []
+  searchCategories = [],
+  siteSettings,
+  heroBanners = []
 }: PropertiesPageViewProps) {
   
   // -------------------------------------------------------------
@@ -346,7 +351,11 @@ export default function PropertiesPageView({
   useEffect(() => {
     const el = document.getElementById('listings-layout-view');
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({
+        top: elementPosition - 100,
+        behavior: 'smooth'
+      });
     }
   }, [currentPage, selectedCategoryTab]);
 
@@ -449,39 +458,149 @@ export default function PropertiesPageView({
     onOpenSiteVisit();
   };
 
+  const handleBannerButtonClick = (action: string | BannerButtonConfig) => {
+    if (!action) return;
+
+    if (typeof action === 'string') {
+      // Legacy URL / action behavior
+      if (action === 'custom-request') {
+        onOpenCustomRequest();
+      } else if (action && action.startsWith('#')) {
+        const el = document.getElementById(action.substring(1));
+        if (el) {
+          const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+          window.scrollTo({
+            top: elementPosition - 100,
+            behavior: 'smooth'
+          });
+        }
+      } else if (action) {
+        window.open(action, '_blank');
+      } else {
+        const el = document.getElementById('listings-layout-view');
+        if (el) {
+          const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+          window.scrollTo({
+            top: elementPosition - 100,
+            behavior: 'smooth'
+          });
+        }
+      }
+      return;
+    }
+
+    // Advanced Configured Behavior
+    const { destinationType, destinationValue, openInNewTab } = action;
+    const target = openInNewTab ? '_blank' : '_self';
+
+    switch (destinationType) {
+      case 'internal': {
+        if (destinationValue === 'Contact') {
+          window.dispatchEvent(new CustomEvent('realty-navigate', { detail: { tab: 'Contact' } }));
+        } else if (destinationValue === 'About') {
+          window.dispatchEvent(new CustomEvent('realty-navigate', { detail: { tab: 'About' } }));
+        } else if (destinationValue === 'Home') {
+          window.dispatchEvent(new CustomEvent('realty-navigate', { detail: { tab: 'Home' } }));
+        } else if (destinationValue === 'Properties') {
+          setSelectedCategoryTab('Properties');
+          const el = document.getElementById('listings-layout-view');
+          if (el) {
+            const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+            window.scrollTo({
+              top: elementPosition - 100,
+              behavior: 'smooth'
+            });
+          }
+        } else if (destinationValue === 'Custom Request') {
+          onOpenCustomRequest();
+        }
+        break;
+      }
+      case 'external':
+      case 'custom': {
+        if (destinationValue.startsWith('#')) {
+          const el = document.getElementById(destinationValue.substring(1));
+          if (el) {
+            const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+            window.scrollTo({
+              top: elementPosition - 100,
+              behavior: 'smooth'
+            });
+          }
+        } else {
+          window.open(destinationValue, target);
+        }
+        break;
+      }
+      case 'category': {
+        const match = activeSearchCategories.find(
+          c => c.id.toLowerCase() === destinationValue.toLowerCase() || 
+               c.title.toLowerCase() === destinationValue.toLowerCase()
+        );
+        if (match) {
+          setSelectedCategoryTab(match.id);
+        } else {
+          setSelectedCategoryTab(destinationValue);
+        }
+        const el = document.getElementById('listings-layout-view');
+        if (el) {
+          setTimeout(() => {
+            const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+            window.scrollTo({
+              top: elementPosition - 100,
+              behavior: 'smooth'
+            });
+          }, 100);
+        }
+        break;
+      }
+      case 'property': {
+        const prop = properties.find(p => p.id === destinationValue);
+        if (prop) {
+          onViewDetails(prop);
+        }
+        break;
+      }
+      case 'contact': {
+        window.dispatchEvent(new CustomEvent('realty-navigate', { detail: { tab: 'Contact' } }));
+        break;
+      }
+      case 'custom-request': {
+        onOpenCustomRequest();
+        break;
+      }
+      default: {
+        const el = document.getElementById('listings-layout-view');
+        if (el) {
+          const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+          window.scrollTo({
+            top: elementPosition - 100,
+            behavior: 'smooth'
+          });
+        }
+      }
+    }
+  };
+
   return (
     <div className="bg-[#0a192f] text-slate-100 min-h-screen font-sans border-t border-slate-900 leading-normal" id="dvarix-realty-properties-page-root">
       
       {/* ==========================================
-          HERO SECTION (Luxury Dark Real Estate)
+          HERO SECTION (Luxury White Real Estate)
          ========================================== */}
       <section 
-        className="relative bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900/95 via-[#0c1b30] to-[#06101e] py-20 px-4 sm:px-6 lg:px-8 border-b border-slate-900 overflow-hidden" 
-        id="realty-luxury-hero-banner"
+        className="relative bg-[#0F172A] py-12 px-4 sm:px-6 lg:px-8 border-b border-slate-900/60 overflow-hidden" 
+        id="realty-luxury-hero-banner-outer"
       >
-        {/* Luxury premium building layout bg image with overlay */}
-        <div className="absolute inset-0 z-0">
-          <img 
-            src="https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1920&q=80" 
-            alt="Luxury Real Estate Skyscrapers background" 
-            className="w-full h-full object-cover opacity-15 select-none pointer-events-none filter brightness-50 contrast-125"
-            referrerPolicy="no-referrer"
+        <div className="max-w-7xl mx-auto relative z-10 text-left space-y-10">
+          
+          {/* Automatic Luxury Hero Carousel */}
+          <LuxuryHeroCarousel 
+            banners={heroBanners} 
+            onPrimaryClick={handleBannerButtonClick} 
+            onSecondaryClick={handleBannerButtonClick} 
+            carouselSettings={siteSettings?.carouselSettings}
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-[#0a192f]/80 via-[#0a192f]/95 to-[#0a192f]" />
-        </div>
-
-        <div className="max-w-7xl mx-auto relative z-10 text-left">
-          <div className="space-y-4 mb-10">
-            <span className="text-[#ff5a3c] text-xs font-black uppercase tracking-widest font-mono inline-block px-3 py-1 bg-[#ff5a3c]/10 border border-[#ff5a3c]/20 rounded-full">
-              DVARIX REALTY
-            </span>
-            <h1 className="text-4xl sm:text-6xl font-black text-white tracking-tight leading-tight max-w-4xl">
-              Properties Listings
-            </h1>
-            <p className="text-slate-400 text-sm max-w-2xl font-light font-sans leading-relaxed">
-              Discover curated real estate opportunities across Bengaluru for living, investing & growing. Find high appreciation plots, bespoke luxury villas, smart logistics yards, and commercial premises.
-            </p>
-          </div>
 
           {/* Combined Search Form block */}
           <form 
@@ -885,6 +1004,19 @@ export default function PropertiesPageView({
           {/* B. RIGHT COLUMN - Dynamic listing grid */}
           <main className="lg:col-span-9 space-y-6" id="listings-main-display">
             
+            {/* Breadcrumb Trail */}
+            <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400 pb-1" id="properties-breadcrumb-trail">
+              <span className="hover:text-white transition cursor-pointer" onClick={() => handleClearFilters()}>Dvarix Realty</span>
+              <span className="text-slate-600">/</span>
+              <span className="hover:text-white transition cursor-pointer" onClick={() => setSelectedCategoryTab('Properties')}>Properties</span>
+              {selectedCategoryTab !== 'Properties' && (
+                <>
+                  <span className="text-slate-600">/</span>
+                  <span className="text-[#ff5a3c] font-black uppercase tracking-wider">{selectedCategoryTab}</span>
+                </>
+              )}
+            </div>
+
             {/* Sorting bar & Grid toggle */}
             <div className="bg-slate-950/80 border border-slate-900 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="text-left">

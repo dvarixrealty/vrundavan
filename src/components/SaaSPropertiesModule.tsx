@@ -251,6 +251,86 @@ export default function SaaSPropertiesModule({
   const [imageError, setImageError] = useState<string | null>(null);
   const [imageSuccess, setImageSuccess] = useState<string | null>(null);
 
+  const [uploadedCoverUrl, setUploadedCoverUrl] = useState<string>('');
+  const [manualCoverUrl, setManualCoverUrl] = useState<string>('');
+  const [manualGalleryUrls, setManualGalleryUrls] = useState<string>('');
+
+  // Helper to validate absolute HTTP/HTTPS URL
+  const isValidImageUrl = (url: string): boolean => {
+    if (!url) return false;
+    const trimmed = url.trim();
+    return /^https?:\/\/.+/i.test(trimmed);
+  };
+
+  // Helper to distinguish Firebase Storage URLs
+  const isFirebaseStorageUrl = (url: string): boolean => {
+    if (!url) return false;
+    return url.includes('firebasestorage.googleapis.com') || url.includes('/v0/b/') || url.includes('firebase');
+  };
+
+  // Keep formBasic.image synchronized with cover image states
+  useEffect(() => {
+    const finalImage = uploadedCoverUrl || (isValidImageUrl(manualCoverUrl) ? manualCoverUrl.trim() : '');
+    setFormBasic(prev => {
+      if (prev.image !== finalImage) {
+        return { ...prev, image: finalImage };
+      }
+      return prev;
+    });
+  }, [uploadedCoverUrl, manualCoverUrl]);
+
+  // Keep formBasic.imagesStr and manualGalleryUrls synchronized with galleryUploads
+  useEffect(() => {
+    const urls = galleryUploads.map(img => img.url).filter(Boolean);
+    const joined = urls.join(', ');
+    setFormBasic(prev => {
+      if (prev.imagesStr !== joined) {
+        return { ...prev, imagesStr: joined };
+      }
+      return prev;
+    });
+
+    const manualUrls = galleryUploads
+      .map(img => img.url)
+      .filter(url => url && !isFirebaseStorageUrl(url));
+    const joinedManual = manualUrls.join(', ');
+    setManualGalleryUrls(prev => {
+      const norm = (str: string) => str.split(',').map(s => s.trim()).filter(Boolean).join(',');
+      if (norm(prev) !== norm(joinedManual)) {
+        return joinedManual;
+      }
+      return prev;
+    });
+  }, [galleryUploads]);
+
+  const handleManualGalleryUrlsChange = (newValue: string) => {
+    setManualGalleryUrls(newValue);
+
+    // Parse URLs from the input
+    const parsedUrls = newValue
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => isValidImageUrl(s));
+
+    // Reconstruct galleryUploads: preserve existing uploaded (Firebase Storage) images
+    const uploadedImages = galleryUploads.filter(img => isFirebaseStorageUrl(img.url));
+
+    // Create new manual image objects
+    const manualImages = parsedUrls.map((url, index) => {
+      const existing = galleryUploads.find(img => img.url === url);
+      return {
+        id: existing ? existing.id : `manual-gal-${index}-${Date.now()}-${Math.random()}`,
+        name: existing ? existing.name : `Gallery URL ${index + 1}`,
+        progress: 100,
+        uploading: false,
+        url: url
+      };
+    });
+
+    const combined = [...uploadedImages, ...manualImages];
+    setGalleryUploads(combined);
+  };
+
   useEffect(() => {
     if (!currentPropertyId) {
       setCurrentPropertyId('prop-' + Date.now());
@@ -389,7 +469,7 @@ export default function SaaSPropertiesModule({
         setCoverProgress(progress);
       });
 
-      setFormBasic(prev => ({ ...prev, image: downloadUrl }));
+      setUploadedCoverUrl(downloadUrl);
       setImageSuccess('✅ Cover image uploaded successfully');
     } catch (err: any) {
       setImageError(err.message || 'Cover image upload failed');
@@ -399,7 +479,7 @@ export default function SaaSPropertiesModule({
   };
 
   const handleRemoveCover = () => {
-    setFormBasic(prev => ({ ...prev, image: '' }));
+    setUploadedCoverUrl('');
     setCoverProgress(0);
     setImageSuccess(null);
   };
@@ -745,14 +825,32 @@ export default function SaaSPropertiesModule({
     
     // Populate gallery uploads with existing image URLs
     const existingGalleryUrls = p.images || p.galleryImages || [];
-    const initialGallery = existingGalleryUrls.map((url, index) => ({
-      id: `existing-${index}-${Date.now()}`,
-      name: `Gallery Image ${index + 1}`,
-      progress: 100,
-      uploading: false,
-      url: url
-    }));
+    const initialGallery = existingGalleryUrls.map((url, index) => {
+      const isUploaded = url.includes('firebasestorage.googleapis.com') || url.includes('/v0/b/') || url.includes('firebase');
+      return {
+        id: isUploaded ? `existing-${index}-${Date.now()}` : `manual-gal-${index}-${Date.now()}-${Math.random()}`,
+        name: isUploaded ? `Gallery Image ${index + 1}` : `Gallery URL ${index + 1}`,
+        progress: 100,
+        uploading: false,
+        url: url
+      };
+    });
     setGalleryUploads(initialGallery);
+
+    // Cover Image distinction
+    if (p.image) {
+      const isUploaded = p.image.includes('firebasestorage.googleapis.com') || p.image.includes('/v0/b/') || p.image.includes('firebase');
+      if (isUploaded) {
+        setUploadedCoverUrl(p.image);
+        setManualCoverUrl('');
+      } else {
+        setUploadedCoverUrl('');
+        setManualCoverUrl(p.image);
+      }
+    } else {
+      setUploadedCoverUrl('');
+      setManualCoverUrl('');
+    }
 
     setFormBasic({
       title: p.title || '',
@@ -837,6 +935,9 @@ export default function SaaSPropertiesModule({
     setCoverProgress(0);
     setCoverUploading(false);
     setGalleryUploads([]);
+    setUploadedCoverUrl('');
+    setManualCoverUrl('');
+    setManualGalleryUrls('');
     setImageError(null);
     setImageSuccess(null);
     setFormBasic({ title: '', code: '', type: 'Apartment', category: 'Residential', status: 'Published', description: '', image: '', imagesStr: '' });
@@ -873,6 +974,10 @@ export default function SaaSPropertiesModule({
       description: formBasic.description,
       image: formBasic.image || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=800&q=80',
       imagesStr: formBasic.imagesStr,
+      images: [
+        formBasic.image || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=800&q=80',
+        ...(formBasic.imagesStr ? formBasic.imagesStr.split(',').map(s => s.trim()).filter(Boolean) : [])
+      ],
       
       // CMS & Upload Metadata
       coverImage: formBasic.image || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=800&q=80',
@@ -1799,6 +1904,20 @@ export default function SaaSPropertiesModule({
                     </div>
                   </div>
                 )}
+
+                <div className="mt-2.5 space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 font-mono block uppercase">Or Enter Cover Image URL</label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/image.jpg"
+                    value={manualCoverUrl}
+                    onChange={(e) => setManualCoverUrl(e.target.value)}
+                    className="w-full border border-slate-200 bg-white p-2.5 text-xs rounded-lg font-mono focus:border-sky-500 focus:outline-none"
+                  />
+                  {manualCoverUrl && !isValidImageUrl(manualCoverUrl) && (
+                    <p className="text-[10px] text-red-500 font-mono">Please enter a valid HTTP/HTTPS image URL.</p>
+                  )}
+                </div>
               </div>
 
               {/* Gallery Image Upload */}
@@ -1842,6 +1961,20 @@ export default function SaaSPropertiesModule({
                       Select Multiple Files
                     </span>
                   </label>
+                </div>
+
+                <div className="mt-2.5 space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 font-mono block uppercase">Or Enter Gallery Image URL(s) (Comma-separated)</label>
+                  <textarea
+                    rows={2}
+                    placeholder="https://example.com/img1.jpg, https://example.com/img2.jpg"
+                    value={manualGalleryUrls}
+                    onChange={(e) => handleManualGalleryUrlsChange(e.target.value)}
+                    className="w-full border border-slate-200 bg-white p-2.5 text-xs rounded-lg font-mono focus:border-sky-500 focus:outline-none"
+                  />
+                  {manualGalleryUrls && manualGalleryUrls.split(',').some(url => url.trim() && !isValidImageUrl(url)) && (
+                    <p className="text-[10px] text-red-500 font-mono">Please make sure all URLs entered are valid HTTP/HTTPS image links.</p>
+                  )}
                 </div>
 
                 {/* Previews & Sorting Container */}

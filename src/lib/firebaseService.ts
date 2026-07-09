@@ -6,10 +6,12 @@ import {
   deleteDoc, 
   getDocs,
   query,
-  limit
+  limit,
+  updateDoc,
+  increment
 } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType, auth } from "../firebase";
-import { Property, Inquiry, CustomRequirement, Agent, MapLocation, AdminUser, FAQ, MapSettings, QuickFilter, AiPermission, AiActivityLog, CentralEnquiry, RoutingRule, SiteCMSConfig } from "../types";
+import { Property, Inquiry, CustomRequirement, Agent, MapLocation, AdminUser, FAQ, MapSettings, QuickFilter, AiPermission, AiActivityLog, CentralEnquiry, RoutingRule, SiteCMSConfig, HeroBanner, CampaignService, FreeServiceRequest, AdminTheme } from "../types";
 
 // Firebase Services Helper
 export function cleanPropertyPayload(property: any): any {
@@ -241,6 +243,123 @@ export const firebaseService = {
     const path = `campaigns/${campaignId}`;
     try {
       await deleteDoc(doc(db, "campaigns", campaignId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+
+  // Upgraded Campaign Services CMS Methods
+  subscribeCampaignServices(onUpdate: (services: CampaignService[]) => void, onError: (err: any) => void) {
+    const path = "campaign_services";
+    try {
+      return onSnapshot(
+        collection(db, path),
+        (snapshot) => {
+          const list: CampaignService[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push(docSnap.data() as CampaignService);
+          });
+          list.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+          onUpdate(list);
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, path);
+          onError(error);
+        }
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  },
+
+  async saveCampaignService(service: CampaignService) {
+    const path = `campaign_services/${service.id}`;
+    try {
+      await setDoc(doc(db, "campaign_services", service.id), service);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  async deleteCampaignService(serviceId: string) {
+    const path = `campaign_services/${serviceId}`;
+    try {
+      await deleteDoc(doc(db, "campaign_services", serviceId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+
+  async incrementCampaignServiceViews(serviceId: string) {
+    const path = `campaign_services/${serviceId}`;
+    try {
+      await setDoc(doc(db, "campaign_services", serviceId), {
+        views: increment(1)
+      }, { merge: true });
+    } catch (error) {
+      console.error("Failed to increment views:", error);
+    }
+  },
+
+  async incrementCampaignServiceClicks(serviceId: string) {
+    const path = `campaign_services/${serviceId}`;
+    try {
+      await setDoc(doc(db, "campaign_services", serviceId), {
+        clicks: increment(1)
+      }, { merge: true });
+    } catch (error) {
+      console.error("Failed to increment clicks:", error);
+    }
+  },
+
+  async incrementCampaignServiceSubmissions(serviceId: string) {
+    const path = `campaign_services/${serviceId}`;
+    try {
+      await setDoc(doc(db, "campaign_services", serviceId), {
+        submissions: increment(1)
+      }, { merge: true });
+    } catch (error) {
+      console.error("Failed to increment submissions:", error);
+    }
+  },
+
+  // Free Service Requests Module Methods
+  subscribeFreeServiceRequests(onUpdate: (requests: FreeServiceRequest[]) => void, onError: (err: any) => void) {
+    const path = "campaign_requests";
+    try {
+      return onSnapshot(
+        collection(db, path),
+        (snapshot) => {
+          const list: FreeServiceRequest[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push(docSnap.data() as FreeServiceRequest);
+          });
+          list.sort((a, b) => b.submittedDate.localeCompare(a.submittedDate));
+          onUpdate(list);
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, path);
+          onError(error);
+        }
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  },
+
+  async saveFreeServiceRequest(request: FreeServiceRequest) {
+    const path = `campaign_requests/${request.id}`;
+    try {
+      await setDoc(doc(db, "campaign_requests", request.id), request);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  async deleteFreeServiceRequest(requestId: string) {
+    const path = `campaign_requests/${requestId}`;
+    try {
+      await deleteDoc(doc(db, "campaign_requests", requestId));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, path);
     }
@@ -604,39 +723,84 @@ export const firebaseService = {
                 {
                   id: "b1",
                   title: "Bangalore Real Estate Surge in 2026",
+                  slug: "bangalore-real-estate-surge-2026",
+                  summary: "Why micro-markets in JP Nagar and Whitefield are seeing unprecedented double-digit demand.",
                   excerpt: "Why micro-markets in JP Nagar and Whitefield are seeing unprecedented double-digit demand.",
                   content: "The property landscape in Southern and Eastern Bangalore is expanding rapidly. With new metro corridors opening and tech hubs decentralizing, property valuations are scaling significantly. Learn why investing early in gated plots and customizable luxury villas represents the most reliable equity hedge of the decade.",
                   image: "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80",
+                  featuredImage: "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80",
+                  category: "Market Briefs",
+                  tags: ["Bangalore", "Investment", "Real Estate"],
                   date: "2026-06-15",
+                  publishDate: "2026-06-15",
                   author: "Advisors Board",
-                  published: true
+                  published: true,
+                  status: "Published",
+                  featured: true,
+                  displayOrder: 1,
+                  readingTime: "3 min read",
+                  comments: [],
+                  seoTitle: "Bangalore Real Estate Surge in 2026 | Dvarix Insights",
+                  seoDescription: "Why micro-markets in JP Nagar and Whitefield are seeing unprecedented double-digit demand.",
+                  updatedAt: "2026-06-15",
+                  createdAt: "2026-06-15"
                 },
                 {
                   id: "b2",
                   title: "Bespoke Villas vs. Premium High-Rise Apartments",
+                  slug: "bespoke-villas-vs-premium-high-rise-apartments",
+                  summary: "Deep analysis into privacy, customization, and land share appreciation benefits.",
                   excerpt: "Deep analysis into privacy, customization, and land share appreciation benefits.",
                   content: "Many high-net-worth investors face the dilemma of opting for convenient sky-villas or absolute ownership custom-built architectural villas. In this brief, we analyze the structural density differences, maintenance amortizations, and historical land-price appreciation records.",
                   image: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80",
+                  featuredImage: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80",
+                  category: "Market Briefs",
+                  tags: ["Luxury", "Villas", "Apartments"],
                   date: "2026-06-28",
+                  publishDate: "2026-06-28",
                   author: "Premium Sourcing Desk",
-                  published: true
+                  published: true,
+                  status: "Published",
+                  featured: false,
+                  displayOrder: 2,
+                  readingTime: "4 min read",
+                  comments: [],
+                  seoTitle: "Bespoke Villas vs. Premium High-Rise Apartments | Dvarix Insights",
+                  seoDescription: "Deep analysis into privacy, customization, and land share appreciation benefits.",
+                  updatedAt: "2026-06-28",
+                  createdAt: "2026-06-28"
                 }
               ],
               services: [
                 {
                   id: "s1",
                   title: "Requirement-Based Sourcing",
-                  description: "We do not push standard stock portfolios. Our advisors actively hunt specific real-estate parcels tailored strictly to your individual checklist criteria."
+                  description: "Every property search begins with your requirements. We carefully understand your location, budget, lifestyle, and investment goals before presenting handpicked opportunities."
                 },
                 {
                   id: "s2",
-                  title: "Commercial Logistics Acquisition",
-                  description: "Secure Grade-A warehouses, high-bay storage centers, and office lease configurations in Bangalore's key development corridors."
+                  title: "Commercial & Industrial Advisory",
+                  description: "Comprehensive advisory for office spaces, retail outlets, warehouses, industrial assets, and commercial investments across Bengaluru's key growth corridors."
                 },
                 {
                   id: "s3",
-                  title: "Bespoke Land Aggregations",
-                  description: "Aggregating clear-title agricultural plots, greenfield layouts, and corporate parcels with comprehensive sovereign compliance checks."
+                  title: "Land & Plot Acquisition",
+                  description: "Verified residential plots, villa communities, farm lands, and investment parcels with complete legal due diligence and transparent documentation."
+                },
+                {
+                  id: "s4",
+                  title: "Legal Verification & Compliance",
+                  description: "Every recommended property is reviewed for title clarity, approvals, EC, Khata, RERA compliance, and essential legal documentation wherever applicable."
+                },
+                {
+                  id: "s5",
+                  title: "Home Loan & Financial Assistance",
+                  description: "Simplifying home financing through trusted banking partners, competitive interest rates, and end-to-end loan processing support."
+                },
+                {
+                  id: "s6",
+                  title: "End-to-End Property Assistance",
+                  description: "From consultation and property discovery to registration and after-sales support, Dvarix Realty stands by you throughout your real estate journey."
                 }
               ],
               offers: [
@@ -649,7 +813,171 @@ export const firebaseService = {
                   image: "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=600&q=80",
                   active: true
                 }
-              ]
+              ],
+              heroBanners: [
+                {
+                  id: "b1",
+                  headline: "Find Your Dream Property in Bengaluru",
+                  subheading: "Premium real estate options",
+                  description: "Discover verified plots, luxury villas, apartments and commercial properties across Bengaluru with complete transparency.",
+                  badgeText: "DVARIX REALTY",
+                  propertyCountBadge: "500+ Verified Properties",
+                  desktopImageMethod: "url",
+                  mobileImageMethod: "url",
+                  desktopImage: "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80",
+                  tabletImage: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80",
+                  mobileImage: "https://images.unsplash.com/photo-1600585154526-990dced4db0d?auto=format&fit=crop&w=600&q=80",
+                  primaryButtonText: "Explore Properties",
+                  primaryButtonUrl: "#listings-layout-view",
+                  secondaryButtonText: "Custom Request",
+                  secondaryButtonUrl: "custom-request",
+                  enabled: true,
+                  status: "active",
+                  order: 1,
+                  lastUpdated: "2026-07-04T00:00:00.000Z"
+                },
+                {
+                  id: "b2",
+                  headline: "Premium Villas & Elite Penthouses",
+                  subheading: "Exclusive residential estates",
+                  description: "Explore highly coveted premium luxury villa collections and luxury apartments crafted for your refined standards and custom parameters.",
+                  badgeText: "EXCLUSIVE VILLAS",
+                  propertyCountBadge: "120+ Luxury Villas",
+                  desktopImageMethod: "url",
+                  mobileImageMethod: "url",
+                  desktopImage: "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80",
+                  tabletImage: "https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=800&q=80",
+                  mobileImage: "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=600&q=80",
+                  primaryButtonText: "View Luxury Villas",
+                  primaryButtonUrl: "#listings-layout-view",
+                  secondaryButtonText: "Custom Search Request",
+                  secondaryButtonUrl: "custom-request",
+                  enabled: true,
+                  status: "active",
+                  order: 2,
+                  lastUpdated: "2026-07-04T00:00:00.000Z"
+                }
+              ],
+              statisticsCards: [
+                {
+                  id: "stat_1",
+                  icon: "🏠",
+                  number: "450+",
+                  title: "Verified Properties",
+                  description: "Carefully vetted & documented real estate listings.",
+                  displayOrder: 1,
+                  enabled: true
+                },
+                {
+                  id: "stat_2",
+                  icon: "📍",
+                  number: "25+",
+                  title: "Prime Locations",
+                  description: "Bespoke micro-markets in Bangalore's key growth corridors.",
+                  displayOrder: 2,
+                  enabled: true
+                },
+                {
+                  id: "stat_3",
+                  icon: "😊",
+                  number: "500+",
+                  title: "Happy Clients",
+                  description: "High-net-worth individuals and families settled.",
+                  displayOrder: 3,
+                  enabled: true
+                },
+                {
+                  id: "stat_4",
+                  icon: "⭐",
+                  number: "98%",
+                  title: "Client Satisfaction",
+                  description: "Unmatched client retention and transaction rating.",
+                  displayOrder: 4,
+                  enabled: true
+                },
+                {
+                  id: "stat_5",
+                  icon: "🤝",
+                  number: "15+",
+                  title: "Trusted Developers",
+                  description: "Elite construction partnerships for direct allotment.",
+                  displayOrder: 5,
+                  enabled: true
+                },
+                {
+                  id: "stat_6",
+                  icon: "🎧",
+                  number: "24/7",
+                  title: "Expert Support",
+                  description: "Dedicated helpdesk from legal counseling to keys hand-off.",
+                  displayOrder: 6,
+                  enabled: true
+                }
+              ],
+              statisticsSettings: {
+                animationDuration: 2.0,
+                animationDelay: 150
+              },
+              footerConfig: {
+                logoText: "DVARIX REALTY",
+                brandDescription: "Helping you buy, sell, and invest in verified residential and commercial properties across Bengaluru with complete transparency.",
+                ctas: [
+                  { text: "Explore Properties", type: "tab", target: "Properties", icon: "Explore" },
+                  { text: "Contact Advisor", type: "tab", target: "Contact", icon: "Advisor" }
+                ],
+                companyLinks: [
+                  { label: "Home", url: "Home" },
+                  { label: "Properties", url: "Properties" },
+                  { label: "About Us", url: "About" },
+                  { label: "Contact Us", url: "Contact" },
+                  { label: "Custom Property Request", url: "CustomRequest" }
+                ],
+                servicesLinks: [
+                  { label: "Residential Properties", url: "Properties?type=residential" },
+                  { label: "Commercial Properties", url: "Properties?type=commercial" },
+                  { label: "Plots & Land", url: "Properties?type=plots" },
+                  { label: "Luxury Villas", url: "Properties?type=villas" },
+                  { label: "Investment Advisory", url: "Properties?type=investment" }
+                ],
+                quickLinks: [
+                  { label: "Privacy Policy", url: "Privacy" },
+                  { label: "Terms & Conditions", url: "Terms" },
+                  { label: "RERA Compliance", url: "Rera" },
+                  { label: "FAQs", url: "Faqs" },
+                  { label: "Sitemap", url: "Sitemap" }
+                ],
+                address: "JP Nagar, Bengaluru, Karnataka 560078",
+                phone: "+91 63009 84846",
+                email: "dvarixrealty@gmail.com",
+                socials: [
+                  { platform: "instagram", url: "https://instagram.com/dvarixrealty", enabled: true },
+                  { platform: "facebook", url: "https://facebook.com/dvarixrealty", enabled: true },
+                  { platform: "linkedin", url: "https://linkedin.com/company/dvarixrealty", enabled: true },
+                  { platform: "youtube", url: "https://youtube.com/c/dvarixrealty", enabled: true }
+                ],
+                trustCards: [
+                  { id: "tc_1", title: "Verified Listings", description: "100% Verified Properties", icon: "ShieldCheck" },
+                  { id: "tc_2", title: "Legal Assistance", description: "Property Documentation Support", icon: "FileText" },
+                  { id: "tc_3", title: "RERA Guidance", description: "Professional Compliance Assistance", icon: "CheckCircle" },
+                  { id: "tc_4", title: "Transparent Process", description: "End-to-End Property Advisory", icon: "Compass" }
+                ],
+                copyrightText: "Dvarix Realty. All Rights Reserved.",
+                reraBadgeText: "RERA Registered",
+                reraSubtext: "Real Estate Advisory Services",
+                enableSkyline: true,
+                enableTrustStrip: true,
+                showSocialIcons: true,
+                sectionOrder: ["brand", "company", "services", "quickLinks", "contact"]
+              },
+              faqSettings: {
+                defaultCategory: 'All',
+                maxFaqsToDisplay: 10,
+                showCategoryNavigation: true,
+                showAllCategory: true,
+                enableViewAllButton: true,
+                displayOnlyFeatured: false,
+                enableHomepageFAQSection: true
+              }
             };
             onUpdate(defaults);
           }
@@ -702,6 +1030,142 @@ export const firebaseService = {
       await setDoc(doc(db, "admin_users", user.id), user);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  // Sync Hero Banners (Independent documents)
+  subscribeHeroBanners(onUpdate: (banners: HeroBanner[]) => void, onError: (err: any) => void) {
+    const path = "banner_management";
+    try {
+      return onSnapshot(
+        collection(db, path),
+        (snapshot) => {
+          const list: HeroBanner[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push(docSnap.data() as HeroBanner);
+          });
+          list.sort((a, b) => (a.order || 0) - (b.order || 0));
+          onUpdate(list);
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, path);
+          onError(error);
+        }
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  },
+
+  async saveHeroBanner(banner: HeroBanner) {
+    const path = `banner_management/${banner.id}`;
+    try {
+      await setDoc(doc(db, "banner_management", banner.id), banner);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  async deleteHeroBanner(bannerId: string) {
+    const path = `banner_management/${bannerId}`;
+    try {
+      await deleteDoc(doc(db, "banner_management", bannerId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+
+  async trackBannerAnalytics(bannerId: string, actionType: 'view' | 'click') {
+    const path = `banner_management/${bannerId}`;
+    try {
+      const docRef = doc(db, "banner_management", bannerId);
+      if (actionType === 'view') {
+        await updateDoc(docRef, {
+          views: increment(1)
+        });
+      } else {
+        await updateDoc(docRef, {
+          clicks: increment(1)
+        });
+      }
+    } catch (error) {
+      // Fail silently for analytics tracking to ensure robust experience
+    }
+  },
+
+  async seedDefaultHeroBanners() {
+    const isEmpty = await this.isCollectionEmpty("banner_management");
+    if (!isEmpty) return;
+
+    const defaultBanners: HeroBanner[] = [
+      {
+        id: "b1",
+        bannerName: "Homepage Default Banner 1",
+        headline: "Find Your Dream Property in Bengaluru",
+        subheading: "Premium real estate options",
+        description: "Discover verified plots, luxury villas, apartments and commercial properties across Bengaluru with complete transparency.",
+        badgeText: "DVARIX REALTY",
+        propertyCountBadge: "500+ Verified Properties",
+        desktopImageMethod: "url",
+        mobileImageMethod: "url",
+        desktopImage: "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80",
+        tabletImage: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80",
+        mobileImage: "https://images.unsplash.com/photo-1600585154526-990dced4db0d?auto=format&fit=crop&w=600&q=80",
+        primaryButtonText: "Explore Properties",
+        primaryButtonUrl: "#listings-layout-view",
+        secondaryButtonText: "Custom Request",
+        secondaryButtonUrl: "custom-request",
+        enabled: true,
+        status: "active",
+        order: 1,
+        lastUpdated: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        layout: {
+          contentPosition: 'left',
+          verticalAlignment: 'center',
+          contentWidth: 'large',
+          heroImagePosition: 'right',
+          heroImageWidth: 50,
+          heroImageBorderRadius: 16
+        }
+      },
+      {
+        id: "b2",
+        bannerName: "Homepage Default Banner 2",
+        headline: "Premium Villas & Elite Penthouses",
+        subheading: "Exclusive residential estates",
+        description: "Explore highly coveted premium luxury villa collections and luxury apartments crafted for your refined standards and custom parameters.",
+        badgeText: "EXCLUSIVE VILLAS",
+        propertyCountBadge: "120+ Luxury Villas",
+        desktopImageMethod: "url",
+        mobileImageMethod: "url",
+        desktopImage: "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80",
+        tabletImage: "https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=800&q=80",
+        mobileImage: "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=600&q=80",
+        primaryButtonText: "View Luxury Villas",
+        primaryButtonUrl: "#listings-layout-view",
+        secondaryButtonText: "Custom Search Request",
+        secondaryButtonUrl: "custom-request",
+        enabled: true,
+        status: "active",
+        order: 2,
+        lastUpdated: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        layout: {
+          contentPosition: 'left',
+          verticalAlignment: 'center',
+          contentWidth: 'large',
+          heroImagePosition: 'right',
+          heroImageWidth: 50,
+          heroImageBorderRadius: 16
+        }
+      }
+    ];
+
+    for (const banner of defaultBanners) {
+      await this.saveHeroBanner(banner);
     }
   },
 
@@ -834,7 +1298,11 @@ export const firebaseService = {
       }
     ];
 
-    for (const faq of defaultFaqs) {
+    for (let i = 0; i < defaultFaqs.length; i++) {
+      const faq = defaultFaqs[i];
+      faq.showOnHomepage = i < 4; // Show first 4 on homepage for nice starter look
+      faq.homepageOrder = i + 1;
+      faq.homepageStatus = i < 4 ? "Visible" : "Hidden";
       await this.saveFAQ(faq);
     }
   },
@@ -1057,6 +1525,191 @@ export const firebaseService = {
     const path = `site_visits/${visitId}`;
     try {
       await deleteDoc(doc(db, "site_visits", visitId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+
+  // Admin Theme Studio methods
+  subscribeAdminTheme(onUpdate: (theme: AdminTheme) => void, onError: (err: any) => void) {
+    const path = "settings/admin_theme";
+    try {
+      return onSnapshot(
+        doc(db, "settings", "admin_theme"),
+        (docSnap) => {
+          if (docSnap.exists()) {
+            onUpdate(docSnap.data() as AdminTheme);
+          } else {
+            // Default Royal Blue preset if no settings found
+            const defaults: AdminTheme = {
+              themeId: 'royal_blue',
+              themeName: 'Royal Blue (Default)',
+              createdBy: 'Super Admin',
+              updatedAt: new Date().toISOString(),
+              sidebar: {
+                background: '#0f172a', // Slate 900
+                hover: '#1e293b', // Slate 800
+                active: '#1e3a8a', // Blue 900
+                border: '#1e293b',
+                shadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                text: '#94a3b8', // Slate 400
+                activeText: '#ffffff',
+                icon: '#64748b', // Slate 500
+                activeIcon: '#3b82f6', // Blue 500
+                divider: '#1e293b',
+                badgeBg: '#ef4444', // Red 500
+                badgeText: '#ffffff',
+                accordionBg: '#0f172a',
+                accordionHover: '#1e293b',
+                accordionBorder: '#1e293b',
+              },
+              header: {
+                background: '#ffffff',
+                border: '#e2e8f0', // Slate 200
+                text: '#0f172a', // Slate 900
+                searchBg: '#f1f5f9', // Slate 100
+                notificationIcon: '#64748b',
+                profileIcon: '#3b82f6',
+                shadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+              },
+              content: {
+                background: '#f8fafc', // Slate 50
+                pageBg: '#f8fafc',
+                cards: '#ffffff',
+                tables: '#ffffff',
+                forms: '#ffffff',
+                dialogs: '#ffffff',
+                popups: '#ffffff',
+                drawer: '#ffffff',
+              },
+              buttons: {
+                primaryBg: '#2563eb', // Blue 600
+                primaryText: '#ffffff',
+                secondaryBg: '#64748b', // Slate 500
+                secondaryText: '#ffffff',
+                successBg: '#16a34a', // Green 600
+                successText: '#ffffff',
+                dangerBg: '#dc2626', // Red 600
+                dangerText: '#ffffff',
+                warningBg: '#ca8a04', // Yellow 600
+                warningText: '#ffffff',
+                infoBg: '#0891b2', // Cyan 600
+                infoText: '#ffffff',
+                hoverOpacity: 85,
+                shadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+                borderRadius: '0.375rem', // md
+              },
+              inputs: {
+                background: '#ffffff',
+                border: '#cbd5e1', // Slate 300
+                focusBorder: '#3b82f6', // Blue 500
+                placeholder: '#94a3b8',
+                checkbox: '#2563eb',
+                radio: '#2563eb',
+                switchBg: '#cbd5e1',
+                dropdown: '#ffffff',
+              },
+              typography: {
+                headingFont: 'Inter',
+                bodyFont: 'Inter',
+                sidebarFont: 'Inter',
+                menuWeight: '500',
+                headingWeight: '600',
+                buttonWeight: '500',
+                fontSize: '0.875rem', // sm
+                letterSpacing: '0px',
+              },
+              icons: {
+                pack: 'Lucide',
+                size: '18px',
+                color: '#64748b',
+                activeColor: '#3b82f6',
+                hoverColor: '#1e293b',
+                rounded: true,
+                outlined: true,
+                filled: false,
+              },
+              borderRadius: {
+                global: '0.5rem', // lg
+                cards: '0.5rem',
+                buttons: '0.375rem',
+                inputs: '0.375rem',
+                sidebar: '0.375rem',
+                dropdown: '0.375rem',
+                dialogs: '0.5rem',
+                sliders: '9999px',
+              },
+              shadowSettings: {
+                type: 'Soft',
+              },
+              layout: {
+                sidebarWidth: '280px',
+                expandedWidth: '280px',
+                miniWidth: '72px',
+                headerHeight: '64px',
+                contentWidth: 'Comfortable',
+                compactMode: false,
+                comfortableMode: true,
+                spaciousMode: false,
+              },
+            };
+            onUpdate(defaults);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, path);
+          onError(error);
+        }
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  },
+
+  async saveAdminTheme(theme: AdminTheme) {
+    const path = "settings/admin_theme";
+    try {
+      await setDoc(doc(db, "settings", "admin_theme"), theme);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  subscribeThemePresets(onUpdate: (presets: AdminTheme[]) => void, onError: (err: any) => void) {
+    const path = "theme_presets";
+    try {
+      return onSnapshot(
+        collection(db, path),
+        (snapshot) => {
+          const list: AdminTheme[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push(docSnap.data() as AdminTheme);
+          });
+          onUpdate(list);
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, path);
+          onError(error);
+        }
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  },
+
+  async saveThemePreset(preset: AdminTheme) {
+    const path = `theme_presets/${preset.themeId}`;
+    try {
+      await setDoc(doc(db, "theme_presets", preset.themeId), preset);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  async deleteThemePreset(themeId: string) {
+    const path = `theme_presets/${themeId}`;
+    try {
+      await deleteDoc(doc(db, "theme_presets", themeId));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, path);
     }

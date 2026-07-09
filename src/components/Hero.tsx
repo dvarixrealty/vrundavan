@@ -327,13 +327,20 @@ export default function Hero({
                 key={tab.id}
                 type="button"
                 onClick={() => setSelectedType(tab.id)}
-                className={`px-4 py-2 rounded-lg text-[10px] sm:text-xs font-bold tracking-widest uppercase transition-all duration-200 cursor-pointer text-nowrap ${
+                className={`relative px-4 py-2 rounded-lg text-[10px] sm:text-xs font-bold tracking-widest uppercase transition-all duration-200 cursor-pointer text-nowrap select-none ${
                   selectedType === tab.id
-                    ? 'bg-[#ff5a3c] text-white shadow-md'
+                    ? 'text-white'
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                 }`}
               >
-                {tab.title}
+                {selectedType === tab.id && (
+                  <motion.span
+                    layoutId="heroActiveTab"
+                    className="absolute inset-0 bg-[#ff5a3c] rounded-lg shadow-md shadow-orange-950/20"
+                    transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">{tab.title}</span>
               </button>
             ))}
           </div>

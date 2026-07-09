@@ -16,6 +16,7 @@ interface PropertyDetailModalProps {
 export default function PropertyDetailModal({ property, onClose, onAddInquiry, onBookSiteVisit }: PropertyDetailModalProps) {
   const [activeImageIdx, setActiveImageIdx] = useState(0);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   // Mortgage Calculator State
   const [downPaymentPct, setDownPaymentPct] = useState(20); // 20% default
@@ -64,10 +65,11 @@ export default function PropertyDetailModal({ property, onClose, onAddInquiry, o
   const handleInquirySubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!clientName || !clientEmail || !clientPhone) {
-      alert('Please fill out all contact fields');
+      setErrorMessage('Please fill out all contact fields');
       return;
     }
 
+    setErrorMessage('');
     onAddInquiry({
       propertyId: property.id,
       propertyName: property.title,
@@ -350,6 +352,11 @@ export default function PropertyDetailModal({ property, onClose, onAddInquiry, o
                     </motion.div>
                   ) : (
                     <form onSubmit={handleInquirySubmit} className="space-y-3">
+                      {errorMessage && (
+                        <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3.5 py-2.5 rounded-xl font-medium" id="modal-form-error-msg">
+                          {errorMessage}
+                        </div>
+                      )}
                       
                       {/* Name input */}
                       <div className="space-y-1 justify-start">

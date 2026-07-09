@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Heart, Menu, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { ActiveTab, AdminUser } from '../types';
 import Logo from './Logo';
 
@@ -52,13 +53,20 @@ export default function Header({
                 key={item.value}
                 id={`nav-item-${item.value.toLowerCase()}`}
                 onClick={() => setActiveTab(item.value)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium tracking-wide transition-all duration-200 cursor-pointer flex items-center gap-1.5 ${
+                className={`relative px-4 py-2 rounded-lg text-sm font-medium tracking-wide transition-colors duration-200 cursor-pointer flex items-center gap-1.5 select-none ${
                   activeTab === item.value
-                    ? 'text-white bg-slate-800/80 shadow-inner border border-slate-700/50'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800/30'
+                    ? 'text-white'
+                    : 'text-slate-300 hover:text-white'
                 }`}
               >
-                {item.label}
+                {activeTab === item.value && (
+                  <motion.span
+                    layoutId="headerActiveTab"
+                    className="absolute inset-0 bg-slate-800/80 shadow-inner border border-slate-700/50 rounded-lg"
+                    transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">{item.label}</span>
               </button>
             ))}
           </nav>
@@ -116,40 +124,49 @@ export default function Header({
       </div>
 
       {/* Mobile Drawer Overlay & Content */}
-      {mobileMenuOpen && (
-        <div className="md:hidden border-t border-slate-800 bg-[#0a192f] select-none" id="mobile-navbar-drawer">
-          <div className="px-2 pt-2 pb-6 space-y-1 sm:px-3">
-            {menuItems.map((item) => (
-              <button
-                key={item.value}
-                onClick={() => {
-                  setActiveTab(item.value);
-                  setMobileMenuOpen(false);
-                }}
-                className={`w-full text-left block px-4 py-3 rounded-lg text-base font-medium transition duration-200 ${
-                  activeTab === item.value
-                    ? 'bg-slate-800 text-white font-semibold'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.25, ease: 'easeInOut' }}
+            className="md:hidden border-t border-slate-800 bg-[#0a192f] select-none overflow-hidden"
+            id="mobile-navbar-drawer"
+          >
+            <div className="px-2 pt-2 pb-6 space-y-1 sm:px-3">
+              {menuItems.map((item) => (
+                <button
+                  key={item.value}
+                  onClick={() => {
+                    setActiveTab(item.value);
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left block px-4 py-3 rounded-lg text-base font-medium transition duration-200 cursor-pointer ${
+                    activeTab === item.value
+                      ? 'bg-slate-800 text-white font-semibold'
+                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
 
-            <div className="pt-4 px-4">
-              <button
-                onClick={() => {
-                  onOpenCustomRequest();
-                  setMobileMenuOpen(false);
-                }}
-                className="w-full bg-[#ff5a3c] text-white py-3 px-4 rounded-xl font-bold tracking-wide text-center block shadow-lg hover:bg-[#e04326] transition active:scale-95"
-              >
-                Custom Request
-              </button>
+              <div className="pt-4 px-4">
+                <button
+                  onClick={() => {
+                    onOpenCustomRequest();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full bg-[#ff5a3c] text-white py-3 px-4 rounded-xl font-bold tracking-wide text-center block shadow-lg hover:bg-[#e04326] transition active:scale-95 cursor-pointer"
+                >
+                  Custom Request
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </header>
   );
 }

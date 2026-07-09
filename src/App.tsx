@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Building2, Phone, Mail, MapPin, Grid, Briefcase, 
-  Clock, Shield, Star, Users, MessageSquare, ChevronRight, CheckCircle
+  Clock, Shield, Star, Users, MessageSquare, ChevronRight, CheckCircle,
+  X, XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Header from './components/Header';
@@ -19,8 +20,11 @@ import RealtyChatbot from './components/RealtyChatbot';
 import FavoritesDrawer from './components/FavoritesDrawer';
 import HomeDetailsSections from './components/HomeDetailsSections';
 import AboutPageView from './components/AboutPageView';
+import PrivacyPolicyView from './components/PrivacyPolicyView';
+import TermsConditionsView from './components/TermsConditionsView';
 import Footer from './components/Footer';
-import { ActiveTab, Property, Inquiry, CustomRequirement, Agent, MapLocation, AdminUser, FAQ, MapSettings, SearchCategory, PropertyTypeCard, QuickFilter, CentralEnquiry, RoutingRule, SiteCMSConfig } from './types';
+import BlogArticlePage from './components/BlogArticlePage';
+import { ActiveTab, Property, Inquiry, CustomRequirement, Agent, MapLocation, AdminUser, FAQ, MapSettings, SearchCategory, PropertyTypeCard, QuickFilter, CentralEnquiry, RoutingRule, SiteCMSConfig, HeroBanner } from './types';
 import { PROPERTIES } from './data';
 import { firebaseService } from './lib/firebaseService';
 import { db, handleFirestoreError, OperationType, auth } from './firebase';
@@ -119,7 +123,9 @@ const SAMPLE_REQUIREMENTS: CustomRequirement[] = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('Home');
+  const isPopStateRef = useRef(false);
   const [selectedLocationSlug, setSelectedLocationSlug] = useState<string | null>(null);
+  const [selectedArticleSlug, setSelectedArticleSlug] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string>('All');
   const [searchFilter, setSearchFilter] = useState({ keyword: '', type: 'All', location: 'All' });
   const [favorites, setFavorites] = useState<string[]>([]);
@@ -142,6 +148,16 @@ export default function App() {
   const [faqs, setFaqs] = useState<FAQ[]>([]);
   const [quickFilters, setQuickFilters] = useState<QuickFilter[]>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [heroBanners, setHeroBanners] = useState<HeroBanner[]>([]);
+  
+  // Custom toast notifications stack state
+  const [toasts, setToasts] = useState<Array<{
+    id: string;
+    title: string;
+    message: string;
+    category?: string;
+    isError?: boolean;
+  }>>([]);
 
   // Persistent administration gateway and specific user roles lists
   const [loggedInUser, setLoggedInUser] = useState<AdminUser | null>(() => {
@@ -202,9 +218,53 @@ export default function App() {
     return () => unsubscribe();
   }, [adminUsers]);
 
+  // Listen to custom navigation events from banners
+  useEffect(() => {
+    const handleNavigation = (e: Event) => {
+      const customEvent = e as CustomEvent<{ tab: any }>;
+      if (customEvent.detail && customEvent.detail.tab) {
+        setActiveTab(customEvent.detail.tab);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    };
+
+    window.addEventListener('realty-navigate', handleNavigation);
+    return () => window.removeEventListener('realty-navigate', handleNavigation);
+  }, []);
+
+  // Listen to custom notification events (e.g., from CMS systems, chatbots, forms)
+  useEffect(() => {
+    const handleNotification = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        title: string;
+        message: string;
+        category?: string;
+        isError?: boolean;
+      }>;
+      if (customEvent.detail) {
+        const { title, message, category, isError } = customEvent.detail;
+        const newToast = {
+          id: `toast-${Date.now()}-${Math.random()}`,
+          title,
+          message,
+          category,
+          isError
+        };
+        setToasts(prev => [...prev, newToast]);
+        setTimeout(() => {
+          setToasts(prev => prev.filter(t => t.id !== newToast.id));
+        }, 5000);
+      }
+    };
+
+    window.addEventListener('cms-alert-notification', handleNotification);
+    return () => window.removeEventListener('cms-alert-notification', handleNotification);
+  }, []);
+
   // Synchronise path transitions with React state
   useEffect(() => {
     const handleUrlChange = () => {
+      isPopStateRef.current = true;
       const path = window.location.pathname;
       if (path.startsWith('/location/')) {
         const slug = path.split('/location/')[1];
@@ -215,6 +275,13 @@ export default function App() {
       } else if (path === '/properties' || path.startsWith('/properties/')) {
         setSelectedLocationSlug(null);
         setActiveTab('Properties');
+      } else if (path.startsWith('/insights/')) {
+        const slug = path.split('/insights/')[1];
+        if (slug) {
+          setSelectedLocationSlug(null);
+          setSelectedArticleSlug(slug);
+          setActiveTab('Insights');
+        }
       } else if (path === '/about' || path.startsWith('/about/')) {
         setSelectedLocationSlug(null);
         setActiveTab('About');
@@ -249,6 +316,8 @@ export default function App() {
 
     if (selectedLocationSlug) {
       targetPath = `/location/${selectedLocationSlug}`;
+    } else if (activeTab === 'Insights' && selectedArticleSlug) {
+      targetPath = `/insights/${selectedArticleSlug}`;
     } else if (activeTab === 'Properties') {
       targetPath = '/properties';
     } else if (activeTab === 'About') {
@@ -261,13 +330,16 @@ export default function App() {
       targetPath = '/';
     }
 
-    if (currentPathName !== targetPath && !currentPathName.startsWith('/location/')) {
+    if (currentPathName !== targetPath && !currentPathName.startsWith('/location/') && !currentPathName.startsWith('/insights/')) {
       if (activeTab === 'Properties' && currentPathName.startsWith('/properties')) {
+        return;
+      }
+      if (activeTab === 'Insights' && currentPathName.startsWith('/insights')) {
         return;
       }
       window.history.pushState(null, '', targetPath);
     }
-  }, [activeTab, selectedLocationSlug, loggedInUser]);
+  }, [activeTab, selectedLocationSlug, loggedInUser, selectedArticleSlug]);
 
   const handleNavigateToLocation = (slug: string) => {
     const formattedSlug = slug.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -281,6 +353,97 @@ export default function App() {
     setActiveTab('Home');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Smooth scroll manager on tab change (taking header offset into account)
+  useEffect(() => {
+    if (isPopStateRef.current) {
+      isPopStateRef.current = false;
+      return;
+    }
+
+    let targetId = '';
+    if (activeTab === 'Home') targetId = 'home-view-elements';
+    else if (activeTab === 'Properties') targetId = 'dvarix-realty-properties-page-root';
+    else if (activeTab === 'About') targetId = 'about-us-page-view';
+    else if (activeTab === 'Contact') targetId = 'contact-view-elements';
+    else if (activeTab === 'PrivacyPolicy') targetId = 'privacy-policy-view';
+    else if (activeTab === 'Terms') targetId = 'terms-conditions-view';
+    else if (activeTab === 'Insights') targetId = 'blog-article-full-page-view';
+
+    if (targetId) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(targetId);
+        if (el) {
+          const headerOffset = 100; // height of the sticky header (80px) + 20px buffer
+          const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+          const offsetPosition = elementPosition - headerOffset;
+          
+          window.scrollTo({
+            top: Math.max(0, offsetPosition),
+            behavior: 'smooth'
+          });
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }, 150); // wait for dynamic layout rendering
+      return () => clearTimeout(timer);
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [activeTab]);
+
+  // Global anchor click scroll offset handler
+  useEffect(() => {
+    const handleAnchorClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const anchor = target.closest('a');
+      if (anchor) {
+        const href = anchor.getAttribute('href');
+        if (href && href.startsWith('#') && href.length > 1) {
+          e.preventDefault();
+          const targetId = href.substring(1);
+          const el = document.getElementById(targetId);
+          if (el) {
+            const headerOffset = 100; // sticky header + spacing
+            const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+            window.scrollTo({
+              top: Math.max(0, elementPosition - headerOffset),
+              behavior: 'smooth'
+            });
+            window.history.pushState(null, '', href);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('click', handleAnchorClick);
+    return () => window.removeEventListener('click', handleAnchorClick);
+  }, []);
+
+  // Handle URL hash on initial load or browser hashchange events
+  useEffect(() => {
+    const handleInitialHashScroll = () => {
+      const hash = window.location.hash;
+      if (hash && hash.length > 1) {
+        const targetId = hash.substring(1);
+        setTimeout(() => {
+          const el = document.getElementById(targetId);
+          if (el) {
+            const headerOffset = 100;
+            const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+            window.scrollTo({
+              top: Math.max(0, elementPosition - headerOffset),
+              behavior: 'smooth'
+            });
+          }
+        }, 350);
+      }
+    };
+
+    window.addEventListener('hashchange', handleInitialHashScroll);
+    handleInitialHashScroll();
+    return () => window.removeEventListener('hashchange', handleInitialHashScroll);
+  }, []);
   const [mapSettings, setMapSettings] = useState<MapSettings>({
     activeProvider: 'OpenStreetMap',
     activeStyle: 'Standard',
@@ -378,17 +541,32 @@ export default function App() {
       {
         id: "s1",
         title: "Requirement-Based Sourcing",
-        description: "We do not push standard stock portfolios. Our advisors actively hunt specific real-estate parcels tailored strictly to your individual checklist criteria."
+        description: "Every property search begins with your requirements. We carefully understand your location, budget, lifestyle, and investment goals before presenting handpicked opportunities."
       },
       {
         id: "s2",
-        title: "Commercial Logistics Acquisition",
-        description: "Secure Grade-A warehouses, high-bay storage centers, and office lease configurations in Bangalore's key development corridors."
+        title: "Commercial & Industrial Advisory",
+        description: "Comprehensive advisory for office spaces, retail outlets, warehouses, industrial assets, and commercial investments across Bengaluru's key growth corridors."
       },
       {
         id: "s3",
-        title: "Bespoke Land Aggregations",
-        description: "Aggregating clear-title agricultural plots, greenfield layouts, and corporate parcels with comprehensive sovereign compliance checks."
+        title: "Land & Plot Acquisition",
+        description: "Verified residential plots, villa communities, farm lands, and investment parcels with complete legal due diligence and transparent documentation."
+      },
+      {
+        id: "s4",
+        title: "Legal Verification & Compliance",
+        description: "Every recommended property is reviewed for title clarity, approvals, EC, Khata, RERA compliance, and essential legal documentation wherever applicable."
+      },
+      {
+        id: "s5",
+        title: "Home Loan & Financial Assistance",
+        description: "Simplifying home financing through trusted banking partners, competitive interest rates, and end-to-end loan processing support."
+      },
+      {
+        id: "s6",
+        title: "End-to-End Property Assistance",
+        description: "From consultation and property discovery to registration and after-sales support, Dvarix Realty stands by you throughout your real estate journey."
       }
     ],
     offers: [
@@ -400,6 +578,42 @@ export default function App() {
         validTill: "2026-07-31",
         image: "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=600&q=80",
         active: true
+      }
+    ],
+    heroBanners: [
+      {
+        id: "b1",
+        headline: "Find Your Dream Property in Bengaluru",
+        subheading: "Premium real estate options",
+        description: "Discover verified plots, luxury villas, apartments and commercial properties across Bengaluru with complete transparency.",
+        badgeText: "DVARIX REALTY",
+        propertyCountBadge: "500+ Verified Properties",
+        desktopImage: "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80",
+        tabletImage: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80",
+        mobileImage: "https://images.unsplash.com/photo-1600585154526-990dced4db0d?auto=format&fit=crop&w=600&q=80",
+        primaryButtonText: "Explore Properties",
+        primaryButtonUrl: "#listings-layout-view",
+        secondaryButtonText: "Custom Request",
+        secondaryButtonUrl: "custom-request",
+        enabled: true,
+        order: 1
+      },
+      {
+        id: "b2",
+        headline: "Premium Villas & Elite Penthouses",
+        subheading: "Exclusive residential estates",
+        description: "Explore highly coveted premium luxury villa collections and luxury apartments crafted for your refined standards and custom parameters.",
+        badgeText: "EXCLUSIVE VILLAS",
+        propertyCountBadge: "120+ Luxury Villas",
+        desktopImage: "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80",
+        tabletImage: "https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=800&q=80",
+        mobileImage: "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=600&q=80",
+        primaryButtonText: "View Luxury Villas",
+        primaryButtonUrl: "#listings-layout-view",
+        secondaryButtonText: "Custom Search Request",
+        secondaryButtonUrl: "custom-request",
+        enabled: true,
+        order: 2
       }
     ]
   });
@@ -783,6 +997,9 @@ export default function App() {
         console.log("Seeding FAQs if empty...");
         await firebaseService.seedDefaultFAQs();
 
+        console.log("Seeding Hero Banners if empty...");
+        await firebaseService.seedDefaultHeroBanners();
+
         const DEFAULT_QUICK_FILTERS: QuickFilter[] = [
           { id: 'q-villa', name: 'Villa', status: 'Active' },
           { id: 'q-commercial', name: 'Commercial', status: 'Active' },
@@ -867,6 +1084,11 @@ export default function App() {
         (err) => console.error("Site settings subscription failed", err)
       );
 
+      const unsubscribeHeroBanners = firebaseService.subscribeHeroBanners(
+        (list) => setHeroBanners(list),
+        (err) => console.error("Hero banners subscription failed", err)
+      );
+
       const unsubscribeQuickFilters = firebaseService.subscribeQuickFilters(
         (list) => {
           const DEFAULT_QUICK_FILTERS: QuickFilter[] = [
@@ -893,6 +1115,7 @@ export default function App() {
         if (unsubscribeFAQs) unsubscribeFAQs();
         if (unsubscribeMapSettings) unsubscribeMapSettings();
         if (unsubscribeSiteSettings) unsubscribeSiteSettings();
+        if (unsubscribeHeroBanners) unsubscribeHeroBanners();
         if (unsubscribeQuickFilters) unsubscribeQuickFilters();
       };
     }
@@ -1067,7 +1290,14 @@ export default function App() {
 
   const scrollToListings = () => {
     setTimeout(() => {
-      listingsRef.current?.scrollIntoView({ behavior: 'smooth' });
+      const el = listingsRef.current || document.getElementById('listings-scroll-target');
+      if (el) {
+        const elementPosition = el.getBoundingClientRect().top + window.scrollY;
+        window.scrollTo({
+          top: elementPosition - 100,
+          behavior: 'smooth'
+        });
+      }
     }, 100);
   };
 
@@ -1318,6 +1548,11 @@ export default function App() {
                 setActiveTab={setActiveTab}
                 faqs={faqs}
                 siteSettings={siteSettings}
+                onSelectArticleSlug={(slug) => {
+                  setSelectedArticleSlug(slug);
+                  setActiveTab('Insights');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
               />
             </motion.div>
           </div>
@@ -1333,6 +1568,8 @@ export default function App() {
             onOpenSiteVisit={() => setIsSiteVisitBookingOpen(true)}
             setBookingTargetProperty={setBookingTargetProperty}
             searchCategories={searchCategories}
+            siteSettings={siteSettings}
+            heroBanners={heroBanners}
           />
         )}
 
@@ -1349,6 +1586,7 @@ export default function App() {
             customRequirements={customRequirements}
             onAddRequirement={handleAddCustomRequirementStatus}
             mapSettings={mapSettings}
+            heroBanners={heroBanners}
             onUpdateMapSettings={(newSettings) => {
               firebaseService.saveMapSettings(newSettings);
               setMapSettings(newSettings);
@@ -1515,6 +1753,33 @@ export default function App() {
           <AboutPageView 
             setActiveTab={setActiveTab} 
             onOpenCustomRequest={() => setIsCustomRequestOpen(true)} 
+          />
+        )}
+
+        {activeTab === 'PrivacyPolicy' && (
+          <PrivacyPolicyView setActiveTab={setActiveTab} />
+        )}
+
+        {activeTab === 'Terms' && (
+          <TermsConditionsView setActiveTab={setActiveTab} />
+        )}
+
+        {activeTab === 'Insights' && (
+          <BlogArticlePage
+            selectedArticleSlug={selectedArticleSlug}
+            siteSettings={siteSettings}
+            setSiteSettings={(newSettings) => {
+              firebaseService.saveSiteSettings(newSettings);
+              setSiteSettings(newSettings);
+            }}
+            onBack={() => {
+              setActiveTab('Home');
+              setSelectedArticleSlug(null);
+            }}
+            onNavigateToArticle={(slug) => {
+              setSelectedArticleSlug(slug);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
           />
         )}
 
@@ -1693,9 +1958,12 @@ export default function App() {
 
       {/* FOOTER */}
       <Footer 
+        activeTab={activeTab}
         setActiveTab={setActiveTab} 
         scrollToListings={scrollToListings} 
         siteSettings={siteSettings}
+        onOpenCustomRequest={() => setIsCustomRequestOpen(true)}
+        setSearchFilter={setSearchFilter}
       />
 
       {/* LIGHTBOX / MODALS */}
@@ -1754,6 +2022,50 @@ export default function App() {
         properties={properties}
         faqs={faqs}
       />
+
+      {/* 5. Luxury Toast Notification overlay stack */}
+      <div className="fixed top-24 right-4 sm:right-6 z-[100] max-w-sm w-[92vw] sm:w-80 space-y-3 pointer-events-none" id="luxury-toast-stack">
+        <AnimatePresence>
+          {toasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, x: 50, y: -10, scale: 0.95 }}
+              animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 50, scale: 0.95 }}
+              className={`p-4 rounded-xl border pointer-events-auto shadow-lg flex items-start gap-3 backdrop-blur-md ${
+                toast.isError
+                  ? 'bg-rose-950/90 border-rose-800 text-rose-100 shadow-rose-950/20'
+                  : 'bg-slate-900/95 border-slate-800 text-slate-100 shadow-slate-950/30'
+              }`}
+            >
+              {toast.isError ? (
+                <div className="p-1.5 bg-rose-500/20 rounded-lg text-rose-400 mt-0.5 shrink-0">
+                  <XCircle className="w-4 h-4" />
+                </div>
+              ) : (
+                <div className="p-1.5 bg-[#ff5a3c]/15 rounded-lg text-[#ff5a3c] mt-0.5 shrink-0">
+                  <CheckCircle className="w-4 h-4" />
+                </div>
+              )}
+              <div className="flex-1 text-left space-y-0.5">
+                {toast.category && (
+                  <span className="text-[9px] uppercase tracking-wider font-bold text-slate-400 font-mono">
+                    {toast.category}
+                  </span>
+                )}
+                <h5 className="text-xs font-bold leading-tight tracking-tight text-white">{toast.title}</h5>
+                <p className="text-[11px] text-slate-300 font-light leading-snug">{toast.message}</p>
+              </div>
+              <button
+                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                className="text-slate-400 hover:text-white shrink-0 mt-0.5 transition cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
     </div>
   );

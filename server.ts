@@ -14,7 +14,7 @@ import {
 import { GoogleGenAI } from "@google/genai";
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 app.use(cors());
@@ -426,7 +426,212 @@ app.post("/api/chatbot/crm-sync-actions", async (req, res) => {
   }
 });
 
-// 11. TRAIN AI INTEGRATION: THE STRICT 7-STEP AUTO TRAIN SYSTEM PROTOCOL
+// --- ENTERPRISE RAG ARCHITECTURE HELPERS & INTEGRATIONS ---
+
+// Multi-vector cosine similarity calculation
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  if (!vecA || !vecB || vecA.length !== vecB.length || vecA.length === 0) return 0;
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// Generate category-specific semantic embeddings
+async function generateEmbedding(text: string): Promise<number[]> {
+  try {
+    const gemini = getGemini();
+    const response = await gemini.models.embedContent({
+      model: 'gemini-embedding-2-preview',
+      contents: text,
+    }) as any;
+    return response.embedding?.values || response.embeddings?.[0]?.values || [];
+  } catch (err: any) {
+    console.warn("Embedding generation failed, falling back to deterministic semantic representation:", err.message);
+    const mockVec = new Array(1536).fill(0);
+    const cleanText = text.toLowerCase();
+    for (let i = 0; i < cleanText.length; i++) {
+      mockVec[i % 1536] += cleanText.charCodeAt(i) / 255;
+    }
+    const norm = Math.sqrt(mockVec.reduce((sum, val) => sum + val * val, 0));
+    if (norm > 0) {
+      for (let i = 0; i < 1536; i++) mockVec[i] /= norm;
+    }
+    return mockVec;
+  }
+}
+
+// Automatic knowledge item classifier
+async function autoClassifyDocument(item: {
+  title: string;
+  content: string;
+  rawTags: string;
+  source: string;
+  originalCategory?: string;
+}): Promise<{
+  category: string;
+  visibility: 'PUBLIC' | 'ADMIN';
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  status: 'ACTIVE' | 'DRAFT';
+  tags: string[];
+}> {
+  let visibility: 'PUBLIC' | 'ADMIN' = 'PUBLIC';
+  let priority: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM';
+  let status: 'ACTIVE' | 'DRAFT' = 'ACTIVE';
+
+  if (item.source === 'Property Database Knowledge' || item.source === 'Document Learning') {
+    priority = 'HIGH';
+  } else if (item.source === 'AI Notes & Snippets') {
+    priority = 'LOW';
+  }
+
+  const tags: string[] = [];
+  const tagSource = `${item.rawTags || ''} ${item.source || ''}`.toLowerCase();
+  tagSource.split(/[\s,;]+/).map(t => t.trim()).filter(Boolean).forEach(t => {
+    if (!tags.includes(t)) tags.push(t);
+  });
+
+  let category = 'FAQ';
+
+  if (item.source === 'Property Database Knowledge') {
+    category = 'PROPERTY';
+  } else if (item.originalCategory) {
+    const origUpper = item.originalCategory.toUpperCase();
+    if (['COMPANY', 'FAQ', 'PROPERTY', 'LEGAL', 'VASTU', 'WEBSITE', 'CRM', 'INTERNAL'].includes(origUpper)) {
+      category = origUpper;
+    }
+  }
+
+  if (category === 'FAQ') {
+    const fullText = `${item.title} ${item.content} ${item.rawTags || ''}`.toLowerCase();
+    if (fullText.includes('rera') || fullText.includes('registration') || fullText.includes('stamp duty') || fullText.includes('compliance') || fullText.includes('legal')) {
+      category = 'LEGAL';
+    } else if (fullText.includes('vastu') || fullText.includes('direction') || fullText.includes('east facing') || fullText.includes('north facing') || fullText.includes('architectural')) {
+      category = 'VASTU';
+    } else if (fullText.includes('lead') || fullText.includes('qualification') || fullText.includes('crm') || fullText.includes('qualify') || fullText.includes('customer requirements')) {
+      category = 'CRM';
+    } else if (fullText.includes('sop') || fullText.includes('admin manual') || fullText.includes('compliance log') || fullText.includes('version history') || fullText.includes('internal notes') || fullText.includes('personality version')) {
+      category = 'INTERNAL';
+    } else if (fullText.includes('about dvarix') || fullText.includes('vision') || fullText.includes('mission') || fullText.includes('about us') || fullText.includes('contact details') || fullText.includes('services')) {
+      category = 'COMPANY';
+    } else if (item.source === 'Website Import' || fullText.includes('blog') || fullText.includes('website pages')) {
+      category = 'WEBSITE';
+    }
+  }
+
+  if (category === 'INTERNAL') {
+    visibility = 'ADMIN';
+  }
+
+  return { category, visibility, priority, status, tags };
+}
+
+// Intent detection using conversation context
+async function detectCustomerIntent(message: string, chatHistoryText: string): Promise<string> {
+  try {
+    const gemini = getGemini();
+    const prompt = `You are the master routing compiler of Dvarix Realty Bot Studio. Analyze the customer's latest message and conversation context, and classify the customer's intent into exactly one of the following tokens:
+- BUY_PROPERTY (if asking to purchase a property/home)
+- SELL_PROPERTY (if asking to list/sell their property)
+- RENT_PROPERTY (if looking to rent a property)
+- LEASE_PROPERTY (if asking about leasing commercial/residential space)
+- PROPERTY_SEARCH (general property searching or listings queries)
+- PROPERTY_COMPARISON (comparing different properties/amenities)
+- SITE_VISIT (asking to book, schedule, or complete a physical tour)
+- FAQ (common questions about real estate buying/selling processes, general FAQs)
+- COMPANY_INFORMATION (questions about Dvarix Realty itself, our mission, or vision)
+- SERVICES (questions about building construction, renovation, decorators, or services)
+- LEGAL_INFORMATION (questions about RERA, registration, taxes, stamp duty, or legal compliance)
+- HOME_LOAN (questions about financing, home loan rates, or calculators)
+- VASTU (questions about scientific Vastu, directions, architectural guidelines)
+- CONTACT (asking how to contact, phone number, email, address)
+- AGENT (asking to talk to a human agent, broker, or manager)
+- GENERAL_CHAT (social greetings, hello, how are you, chitchat)
+- UNKNOWN (if completely ambiguous)
+
+Response MUST be exactly one of the tokens listed above. Do not include any punctuation, markdown, or other text.
+
+Conversation Context:
+${chatHistoryText}
+
+Latest Customer Message: "${message}"`;
+
+    const response = await gemini.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt
+    });
+    const token = response.text?.trim() || "UNKNOWN";
+    const validIntents = [
+      'BUY_PROPERTY', 'SELL_PROPERTY', 'RENT_PROPERTY', 'LEASE_PROPERTY', 
+      'PROPERTY_SEARCH', 'PROPERTY_COMPARISON', 'SITE_VISIT', 'FAQ', 
+      'COMPANY_INFORMATION', 'SERVICES', 'LEGAL_INFORMATION', 'HOME_LOAN', 
+      'VASTU', 'CONTACT', 'AGENT', 'GENERAL_CHAT', 'UNKNOWN'
+    ];
+    const matched = validIntents.find(i => token.includes(i));
+    return matched || "UNKNOWN";
+  } catch (err) {
+    console.error("Intent detection failed, falling back to UNKNOWN:", err);
+    return "UNKNOWN";
+  }
+}
+
+// Route detected intent to index name
+function routeIntentToIndex(intent: string): string {
+  switch (intent) {
+    case 'BUY_PROPERTY':
+    case 'RENT_PROPERTY':
+    case 'LEASE_PROPERTY':
+    case 'PROPERTY_SEARCH':
+    case 'PROPERTY_COMPARISON':
+      return 'property_index';
+      
+    case 'COMPANY_INFORMATION':
+    case 'SERVICES':
+    case 'CONTACT':
+      return 'company_index';
+      
+    case 'FAQ':
+    case 'HOME_LOAN':
+    case 'GENERAL_CHAT':
+      return 'faq_index';
+      
+    case 'LEGAL_INFORMATION':
+      return 'legal_index';
+      
+    case 'VASTU':
+      return 'vastu_index';
+      
+    case 'SITE_VISIT':
+    case 'SELL_PROPERTY':
+      return 'website_index';
+      
+    case 'AGENT':
+    case 'UNKNOWN':
+    default:
+      return 'crm_index';
+  }
+}
+
+// Search direct Firestore collections for live property data
+function findRelevantLiveProperties(query: string, properties: any[]): any[] {
+  const cleanQuery = query.toLowerCase();
+  return properties.filter(p => {
+    const title = (p.title || '').toLowerCase();
+    const desc = (p.description || '').toLowerCase();
+    const loc = (p.location || '').toLowerCase();
+    const type = (p.type || '').toLowerCase();
+    return title.includes(cleanQuery) || desc.includes(cleanQuery) || loc.includes(cleanQuery) || type.includes(cleanQuery) ||
+      cleanQuery.split(' ').some(word => word.length > 3 && (title.includes(word) || loc.includes(word)));
+  });
+}
+
+// 11. TRAIN AI INTEGRATION: THE ENTERPRISE MULTI-INDEX RAG COMPILER
 app.post("/api/chatbot/trigger-entire-system-train", async (req, res) => {
   try {
     const logs: string[] = [];
@@ -464,31 +669,188 @@ app.post("/api/chatbot/trigger-entire-system-train", async (req, res) => {
     snipSnap.forEach(d => snippets.push(d.data()));
     logs.push(`[${new Date().toLocaleTimeString()}] ✍️ [LOAD] Stacked ${snippets.length} specialized helper instruction overrides.`);
 
-    logs.push(`[${new Date().toLocaleTimeString()}] ⚙️ [COMPILING] Normalizing text. Resolving schema conflicts and overlaps...`);
-    
-    let combinedCorpus = `
-=== SYSTEM IDENTITY ===
-Role: Official AI real estate consultant and expert customer advisor for Dvarix Realty.
-Mission: Help users find properties, estimate pricing, analyze location margins, and register inquiries naturally.
+    logs.push(`[${new Date().toLocaleTimeString()}] ⚙️ [COMPILING] Auto-classifying documents, generating category-specific embeddings and preserving metadata...`);
 
-=== DIRECT OVERRIDES ===
-${faqs.map(f => `Q: ${f.title}\nA: ${f.content}\nTags: ${f.keywords}`).join('\n\n')}
+    // Fetch existing semantic indexes from Firestore to skip duplicates
+    const indexDocNames = [
+      'company_index', 'faq_index', 'property_index', 'legal_index',
+      'vastu_index', 'website_index', 'crm_index', 'internal_index'
+    ];
+    const oldIndexItemsMap: Record<string, any[]> = {};
+    for (const name of indexDocNames) {
+      try {
+        const snap = await getDoc(doc(db, 'chatbot_indexes', name));
+        oldIndexItemsMap[name] = snap.exists() ? (snap.data().items || []) : [];
+      } catch (err) {
+        console.warn(`Could not load old index ${name}:`, err);
+        oldIndexItemsMap[name] = [];
+      }
+    }
 
-=== LEGAL MANUALS & DOCUMENTS ===
-${documents.map(d => `Document "${d.name}":\n${d.content}`).join('\n\n')}
+    function findOldItem(id: string) {
+      for (const name of indexDocNames) {
+        const found = oldIndexItemsMap[name].find((item: any) => item.id === id);
+        if (found) return found;
+      }
+      return null;
+    }
 
-=== WEBSITE SITES CRAWLS ===
-${websites.map(w => `Web Route "${w.url}":\n${w.content}`).join('\n\n')}
+    // Standardize all inputs into a raw corpus array
+    const rawItems: any[] = [];
 
-=== SPECIAL INSTRUCTIONS ===
-${snippets.map(s => `Override instruction: ${s.note}\nKeywords: ${s.keywords}`).join('\n\n')}
+    faqs.forEach(f => {
+      rawItems.push({
+        id: f.id || 'kb-faq-' + Date.now() + '-' + Math.random(),
+        title: f.title || '',
+        content: `Q: ${f.title}\nA: ${f.content}`,
+        originalCategory: f.category || 'FAQ',
+        priority: f.priority || 'Medium',
+        status: f.status || 'Active',
+        rawTags: f.keywords || '',
+        source: 'Manual Q&A',
+        language: 'en'
+      });
+    });
 
-=== PROPERTIES LISTING METADATA ===
-${properties.map(p => `Listing: ${p.title}\nType: ${p.type}\nLocation: ${p.location}\nAddress: ${p.address}\nPrice: ₹${p.price}\nDescription: ${p.description}\nAmenity List: ${(p.amenities || []).join(', ')}`).join('\n\n')}
-`;
+    documents.forEach(d => {
+      rawItems.push({
+        id: d.id || 'doc-' + Date.now() + '-' + Math.random(),
+        title: d.name || '',
+        content: `Document "${d.name}":\n${d.content}`,
+        originalCategory: '',
+        priority: 'High',
+        status: d.status || 'Indexed',
+        rawTags: '',
+        source: 'Document Learning',
+        language: 'en'
+      });
+    });
 
-    logs.push(`[${new Date().toLocaleTimeString()}] 🚀 [AUTO_TRAIN] Transmitting consolidations to Gemini Flash Embedding platform...`);
-    
+    websites.forEach(w => {
+      rawItems.push({
+        id: w.id || 'web-' + Date.now() + '-' + Math.random(),
+        title: w.url || '',
+        content: `Web Route "${w.url}":\n${w.content}`,
+        originalCategory: 'Website',
+        priority: 'Medium',
+        status: w.status || 'Indexed',
+        rawTags: '',
+        source: 'Website Import',
+        language: 'en'
+      });
+    });
+
+    properties.forEach(p => {
+      rawItems.push({
+        id: p.id || 'prop-' + Date.now() + '-' + Math.random(),
+        title: p.title || '',
+        content: `Listing: ${p.title}\nType: ${p.type}\nLocation: ${p.location}\nAddress: ${p.address}\nPrice: ₹${p.price}\nDescription: ${p.description}\nAmenity List: ${(p.amenities || []).join(', ')}`,
+        originalCategory: 'PROPERTY',
+        priority: 'High',
+        status: 'Active',
+        rawTags: `${p.type || ''} ${p.location || ''}`,
+        source: 'Property Database Knowledge',
+        language: 'en'
+      });
+    });
+
+    snippets.forEach(s => {
+      rawItems.push({
+        id: s.id || 'sn-' + Date.now() + '-' + Math.random(),
+        title: 'Instruction Override',
+        content: `Override instruction: ${s.note}\nKeywords: ${s.keywords}`,
+        originalCategory: 'INTERNAL',
+        priority: 'Low',
+        status: s.status || 'Active',
+        rawTags: s.keywords || '',
+        source: 'AI Notes & Snippets',
+        language: 'en'
+      });
+    });
+
+    const newIndexes: Record<string, any[]> = {
+      company_index: [],
+      faq_index: [],
+      property_index: [],
+      legal_index: [],
+      vastu_index: [],
+      website_index: [],
+      crm_index: [],
+      internal_index: []
+    };
+
+    let skippedCount = 0;
+    let indexedCount = 0;
+    let modifiedCount = 0;
+
+    for (const rawItem of rawItems) {
+      const classification = await autoClassifyDocument(rawItem);
+      
+      let indexName = 'faq_index';
+      if (classification.category === 'COMPANY') indexName = 'company_index';
+      else if (classification.category === 'PROPERTY') indexName = 'property_index';
+      else if (classification.category === 'LEGAL') indexName = 'legal_index';
+      else if (classification.category === 'VASTU') indexName = 'vastu_index';
+      else if (classification.category === 'WEBSITE') indexName = 'website_index';
+      else if (classification.category === 'CRM') indexName = 'crm_index';
+      else if (classification.category === 'INTERNAL') indexName = 'internal_index';
+
+      const oldItem = findOldItem(rawItem.id);
+      let embedding: number[] = [];
+      let lastIndexed = new Date().toISOString();
+      let embeddingVersion = 1;
+
+      if (oldItem && oldItem.content === rawItem.content) {
+        embedding = oldItem.embedding || [];
+        embeddingVersion = oldItem.metadata?.embeddingVersion || 1;
+        lastIndexed = oldItem.metadata?.lastIndexed || lastIndexed;
+        skippedCount++;
+        logs.push(`[${new Date().toLocaleTimeString()}] 💾 [SKIP] Preserved identical document embedding for [${rawItem.source}] "${rawItem.title.substring(0, 30)}..." (Version ${embeddingVersion})`);
+      } else {
+        embedding = await generateEmbedding(rawItem.content);
+        if (oldItem) {
+          embeddingVersion = (oldItem.metadata?.embeddingVersion || 1) + 1;
+          modifiedCount++;
+          logs.push(`[${new Date().toLocaleTimeString()}] 🧬 [RE-INDEX] Re-indexed modified document [${rawItem.source}] "${rawItem.title.substring(0, 30)}..." to Version ${embeddingVersion}`);
+        } else {
+          embeddingVersion = 1;
+          indexedCount++;
+          logs.push(`[${new Date().toLocaleTimeString()}] 🏷️ [NEW] Auto-classified & generated embedding for [${rawItem.source}] "${rawItem.title.substring(0, 30)}..." into category ${classification.category}`);
+        }
+      }
+
+      const indexItem = {
+        id: rawItem.id,
+        content: rawItem.content,
+        embedding,
+        metadata: {
+          category: classification.category,
+          visibility: classification.visibility,
+          priority: classification.priority,
+          status: classification.status,
+          lastIndexed,
+          embeddingVersion,
+          source: rawItem.source,
+          language: rawItem.language,
+          tags: classification.tags
+        }
+      };
+
+      newIndexes[indexName].push(indexItem);
+    }
+
+    // Save separate semantic vector indexes
+    for (const [name, items] of Object.entries(newIndexes)) {
+      await setDoc(doc(db, 'chatbot_indexes', name), {
+        items,
+        count: items.length,
+        lastIndexed: new Date().toISOString()
+      });
+      logs.push(`[${new Date().toLocaleTimeString()}] 🗃️ [INDEX] Rebuilt index "${name}" with ${items.length} records.`);
+    }
+
+    // Keep backwards compatibility for the existing UI with compiled_corpus
+    const combinedCorpus = rawItems.map(item => item.content).join('\n\n');
     let systemSummarizedRepresentation = "Dvarix Grounded Core Intelligence compiled successfully.";
     try {
       const gemini = getGemini();
@@ -502,9 +864,8 @@ Consolidated Knowledge Profile: ${combinedCorpus.substring(0, 8000)}`;
       if (aiResponse?.text) {
         systemSummarizedRepresentation = aiResponse.text.trim();
       }
-      logs.push(`[${new Date().toLocaleTimeString()}] 🧠 [MODEL] Gemini compiled system representation index ready: "${systemSummarizedRepresentation.substring(0, 100)}..."`);
     } catch (aiErr: any) {
-      logs.push(`[${new Date().toLocaleTimeString()}] ⚠️ [MODEL] Web embeddings connection bypass, fell back to programmatic indexing matrix. Reason: ${aiErr.message}`);
+      console.warn("Summary generation failed or bypassed:", aiErr.message);
     }
 
     const compiledKnowledgeRef = doc(db, 'chatbot_settings', 'compiled_corpus');
@@ -520,7 +881,13 @@ Consolidated Knowledge Profile: ${combinedCorpus.substring(0, 8000)}`;
     logs.push(`[${new Date().toLocaleTimeString()}] ⚡ [TRIGGERED_LIVE] Deploying compiled vector mappings. Intelligence Mode is ONLINE.`);
     logs.push(`[${new Date().toLocaleTimeString()}] 🎉 [SUCCESS] Training complete. Vector indexes successfully compiled and activated.`);
 
-    await logAuditOnServer('Train AI', 'Core Vector Memory Space', 'Training Pipeline Service', null, { status: 'Success', size: combinedCorpus.length });
+    await logAuditOnServer('Train AI', 'Core Vector Memory Space', 'Training Pipeline Service', null, { 
+      status: 'Success', 
+      totalProcessed: rawItems.length,
+      skipped: skippedCount,
+      reindexed: modifiedCount,
+      newIndexed: indexedCount
+    });
 
     res.json({
       success: true,
@@ -619,20 +986,136 @@ app.post("/api/chatbot/chat", async (req, res) => {
       return res.status(400).json({ success: false, error: "Empty message payload." });
     }
 
-    const compiledSnap = await getDoc(doc(db, 'chatbot_settings', 'compiled_corpus'));
-    const fallbackSummary = "Dvarix Realty specializes in pre-cleared layouts in Devanahalli Aviation High Corridor, Whitefield price appreciation guides, custom scientific Vastu alignments, BBMP A-Khata licenses, and robust construction warranties.";
-    const groundKb = compiledSnap.exists() ? (compiledSnap.data().rawCorpus || fallbackSummary) : fallbackSummary;
-
     // Load dynamic published personality configuration from Firestore
     const configSnap = await getDoc(doc(db, 'chatbot_settings', 'config'));
     const config = configSnap.exists() ? { ...DEFAULT_PERSONALITY, ...configSnap.data() } : DEFAULT_PERSONALITY;
-
-    const gemini = getGemini();
 
     const previousTurns = (chatHistory || []).slice(-6).map((turn: any) => {
       const senderName = turn.sender === 'user' ? 'User' : (config.botName || 'Dvarix Assistant');
       return `${senderName}: ${turn.text}`;
     }).join('\n');
+
+    // 1. Detect Customer Intent using Conversation Context
+    const detectedIntent = await detectCustomerIntent(message, previousTurns);
+
+    // 2. Route detected intent to correct semantic knowledge index
+    const indexName = routeIntentToIndex(detectedIntent);
+
+    // 3. Load items from routed semantic index
+    let indexItems: any[] = [];
+    try {
+      const indexSnap = await getDoc(doc(db, 'chatbot_indexes', indexName));
+      if (indexSnap.exists()) {
+        indexItems = indexSnap.data().items || [];
+      }
+    } catch (indexErr) {
+      console.warn(`Could not load semantic index ${indexName}:`, indexErr);
+    }
+
+    // 4. Protect internal/admin-only content (SOPs, logs, etc.)
+    const publicIndexItems = indexItems.filter(item => {
+      const vis = (item.metadata?.visibility || 'PUBLIC').toUpperCase();
+      const cat = (item.metadata?.category || 'FAQ').toUpperCase();
+      return vis !== 'ADMIN' && cat !== 'INTERNAL';
+    });
+
+    // 5. Retrieve Relevant Context via multi-vector Cosine Similarity
+    let matchedChunks: any[] = [];
+    if (publicIndexItems.length > 0) {
+      const userEmbedding = await generateEmbedding(message);
+      const similarityList = publicIndexItems.map(item => {
+        const sim = cosineSimilarity(userEmbedding, item.embedding || []);
+        return { ...item, similarity: sim };
+      });
+      // Sort by similarity descending
+      similarityList.sort((a, b) => b.similarity - a.similarity);
+      // Retrieve top 5 semantic matches
+      matchedChunks = similarityList.slice(0, 5);
+    }
+
+    // 6. Direct Properties direct collection query override (Priority 1)
+    let livePropertiesMatched: any[] = [];
+    const isPropertyIntent = [
+      'BUY_PROPERTY', 'RENT_PROPERTY', 'LEASE_PROPERTY', 
+      'PROPERTY_SEARCH', 'PROPERTY_COMPARISON'
+    ].includes(detectedIntent);
+
+    if (isPropertyIntent) {
+      try {
+        const propSnap = await getDocs(collection(db, 'properties'));
+        const allProperties: any[] = [];
+        propSnap.forEach(d => allProperties.push({ id: d.id, ...d.data() }));
+        livePropertiesMatched = findRelevantLiveProperties(message, allProperties);
+      } catch (propErr) {
+        console.warn("Could not query live properties directly:", propErr);
+      }
+    }
+
+    // 7. Organize retrieved chunks using Priority Order Grouping
+    const priorityGroups: Record<string, string[]> = {
+      p1: [], // Priority 1: Matched live properties
+      p2: [], // Priority 2: Chunks where source is 'Manual Q&A'
+      p3: [], // Priority 3: Chunks where source is 'Property Database Knowledge'
+      p4: [], // Priority 4: Chunks where source is 'Website Import'
+      p5: [], // Priority 5: Chunks where source is 'Document Learning'
+      p6: [], // Priority 6: Chunks where source is 'AI Notes & Snippets'
+      p7: [], // Priority 7: General Semantic Search chunks
+    };
+
+    if (livePropertiesMatched.length > 0) {
+      livePropertiesMatched.forEach(p => {
+        priorityGroups.p1.push(`Listing: ${p.title}\nType: ${p.type}\nLocation: ${p.location}\nAddress: ${p.address}\nPrice: ₹${p.price}\nBeds/Baths: ${p.beds || 0} BHK, ${p.baths || 0} baths\nDescription: ${p.description}\nAmenity List: ${(p.amenities || []).join(', ')}\n[Status: LIVE DATA - PRIMARY PRIORITY]`);
+      });
+    }
+
+    matchedChunks.forEach(chunk => {
+      const source = chunk.metadata?.source || '';
+      const text = chunk.content;
+      
+      if (source === 'Manual Q&A') {
+        priorityGroups.p2.push(text);
+      } else if (source === 'Property Database Knowledge') {
+        priorityGroups.p3.push(text);
+      } else if (source === 'Website Import') {
+        priorityGroups.p4.push(text);
+      } else if (source === 'Document Learning') {
+        priorityGroups.p5.push(text);
+      } else if (source === 'AI Notes & Snippets') {
+        priorityGroups.p6.push(text);
+      } else {
+        priorityGroups.p7.push(text);
+      }
+    });
+
+    const fallbackSummary = "Dvarix Realty specializes in pre-cleared layouts in Devanahalli Aviation High Corridor, Whitefield price appreciation guides, custom scientific Vastu alignments, BBMP A-Khata licenses, and robust construction warranties.";
+    let groundKbText = "";
+    if (priorityGroups.p1.length > 0) {
+      groundKbText += `=== PRIORITY 1: LIVE PRIMARY DATABASE LISTINGS ===\n(These live database entries override any conflicting static document or manual details)\n${priorityGroups.p1.join('\n\n')}\n\n`;
+    }
+    if (priorityGroups.p2.length > 0) {
+      groundKbText += `=== PRIORITY 2: MANUAL Q&A KNOWLEDGE ===\n${priorityGroups.p2.join('\n\n')}\n\n`;
+    }
+    if (priorityGroups.p3.length > 0) {
+      groundKbText += `=== PRIORITY 3: PROPERTY SCHEMAS ===\n${priorityGroups.p3.join('\n\n')}\n\n`;
+    }
+    if (priorityGroups.p4.length > 0) {
+      groundKbText += `=== PRIORITY 4: WEBSITE IMPORTED PAGES ===\n${priorityGroups.p4.join('\n\n')}\n\n`;
+    }
+    if (priorityGroups.p5.length > 0) {
+      groundKbText += `=== PRIORITY 5: COMPLIANCE & LEGAL DOCUMENTS ===\n${priorityGroups.p5.join('\n\n')}\n\n`;
+    }
+    if (priorityGroups.p6.length > 0) {
+      groundKbText += `=== PRIORITY 6: SPECIALIZED AI NOTES & OVERRIDES ===\n${priorityGroups.p6.join('\n\n')}\n\n`;
+    }
+    if (priorityGroups.p7.length > 0) {
+      groundKbText += `=== PRIORITY 7: SEMANTIC SEARCH GRAPH ===\n${priorityGroups.p7.join('\n\n')}\n\n`;
+    }
+
+    if (!groundKbText.trim()) {
+      groundKbText = fallbackSummary;
+    }
+
+    const gemini = getGemini();
 
     // Compile active business rules descriptions
     let rulesText = "";
@@ -660,7 +1143,7 @@ app.post("/api/chatbot/chat", async (req, res) => {
     // Compile CRM transfer instruction
     let crmText = "";
     if (config.crmSettings && config.crmSettings.leadCreation) {
-      crmText = `\n=== LEAD TRANSFERS ===\nOnce clear property requirements (budget limits, layouts, site visits) are capture, prepare summary for CRM integration.`;
+      crmText = `\n=== LEAD TRANSFERS ===\nOnce clear property requirements (budget limits, layouts, site visits) are captured, prepare summary for CRM integration.`;
     }
 
     const systemInstruction = `${config.systemPrompt || DEFAULT_PERSONALITY.systemPrompt}
@@ -670,7 +1153,7 @@ ${restrictedText}
 ${crmText}
 
 === GROUNDED REVENUE KNOWLEDGE BASE ===
-${groundKb.substring(0, 12000)}`;
+${groundKbText.substring(0, 15000)}`;
 
     const promptText = `
 === CONVERSATION THREAD HISTORY ===
@@ -692,7 +1175,41 @@ Respond to the User Message (Adhering to system persona, being concise and highl
 
     const aiText = aiResponse?.text || "I apologize, our regional database is experiencing high volumes. Let me check immediately.";
 
-    res.json({ success: true, responseText: aiText });
+    // 8. Execute Action (if required)
+    let actionExecuted = "NONE";
+    if (detectedIntent === 'SITE_VISIT') {
+      actionExecuted = "SCHEDULE_PHYSICAL_INSPECTION_TOUR";
+    } else if (isPropertyIntent) {
+      actionExecuted = "ROUTE_TO_SPECIALIZED_REALTY_DESK";
+    } else if (['CONTACT', 'AGENT'].includes(detectedIntent)) {
+      actionExecuted = "OFFER_CALLBACK_ROUTING";
+    }
+
+    // 9. Save CRM Activity Log to Firestore chatbot_crm_activities collection
+    const activityId = 'act-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    const activityRecord = {
+      id: activityId,
+      timestamp: new Date().toISOString(),
+      customerMessage: message,
+      detectedIntent,
+      routedIndex: indexName,
+      actionExecuted,
+      responseText: aiText,
+      status: 'PROCESSED'
+    };
+    try {
+      await setDoc(doc(db, 'chatbot_crm_activities', activityId), activityRecord);
+    } catch (crmErr) {
+      console.warn("Could not save CRM activity:", crmErr);
+    }
+
+    res.json({ 
+      success: true, 
+      responseText: aiText,
+      detectedIntent,
+      routedIndex: indexName,
+      actionExecuted
+    });
   } catch (error: any) {
     console.error("Chatbot Gemini endpoint error:", error);
     res.status(500).json({ success: false, error: error.message });
