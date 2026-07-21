@@ -266,12 +266,57 @@
         "status": { "type": "string", "enum": ["New", "Contacted", "In Progress", "Completed"] }
       },
       "required": ["id", "customerName", "phone", "email", "requestedServiceId", "requestedServiceName", "submittedDate"]
+    },
+    "ChatConversation": {
+      "title": "ChatConversation",
+      "description": "Historical chat logs of user-bot interactions and flow outcomes",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "visitorId": { "type": "string" },
+        "visitorName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "messages": { "type": "array" },
+        "startedAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "status": { "type": "string" },
+        "leadStatus": { "type": "string" },
+        "assignedAgent": { "type": "string" },
+        "source": { "type": "string" }
+      },
+      "required": ["conversationId", "sessionId", "visitorId", "visitorName"]
+    },
+    "BrandingSetting": {
+      "title": "BrandingSetting",
+      "description": "Global website identity branding configuration used across layout and meta tags",
+      "type": "object",
+      "properties": {
+        "companyName": { "type": "string" },
+        "tagline": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "faviconUrl": { "type": "string" },
+        "seoLogoUrl": { "type": "string" },
+        "ogImageUrl": { "type": "string" },
+        "websiteUrl": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["companyName", "logoUrl"]
     }
   },
   "firestore": {
     "/properties": {
       "schema": "Property",
       "description": "Dynamic listings repository"
+    },
+    "/chat_conversations": {
+      "schema": "ChatConversation",
+      "description": "Historical consumer interactions and qualificaton dialogue routes"
     },
     "/inquiries": {
       "schema": "Inquiry",

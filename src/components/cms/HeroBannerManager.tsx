@@ -5,11 +5,13 @@ import {
   FileText, ArrowUpRight, CheckCircle2, RefreshCw, X, Sliders, Palette, Move, Type, 
   Monitor, Tablet, Phone, Film, AlignLeft, ShieldCheck, ChevronDown, RotateCcw, BarChart3
 } from 'lucide-react';
-import { HeroBanner, CarouselSettings, BannerButtonConfig, SiteCMSConfig, Property, PropertyTypeCard } from '../../types';
+import { HeroBanner, CarouselSettings, BannerButtonConfig, SiteCMSConfig, Property, PropertyTypeCard, DEFAULT_VISUAL_LAYOUT_SETTINGS, VisualLayoutSettings } from '../../types';
 import { firebaseService } from '../../lib/firebaseService';
+import { mysqlClientService } from '../../lib/mysqlClientService';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage, auth } from '../../firebase';
 import LuxuryHeroCarousel from '../LuxuryHeroCarousel';
+import MediaPicker from '../MediaPicker';
 
 // Import modular subcomponents
 import AnalyticsDashboard from './hero-builder/AnalyticsDashboard';
@@ -70,6 +72,7 @@ interface HeroBannerManagerProps {
   properties?: Property[];
   categories?: PropertyTypeCard[];
   heroBanners?: HeroBanner[];
+  useFirebase?: boolean;
 }
 
 export default function HeroBannerManager({
@@ -77,8 +80,34 @@ export default function HeroBannerManager({
   setSiteSettings,
   properties = [],
   categories = [],
-  heroBanners = []
+  heroBanners = [],
+  useFirebase = false
 }: HeroBannerManagerProps) {
+
+  // Helpers to save and delete hero banners with MySQL support
+  const saveHeroBannerLocal = async (banner: HeroBanner) => {
+    if (useFirebase) {
+      await firebaseService.saveHeroBanner(banner);
+    } else {
+      await mysqlClientService.saveHeroBanner(banner);
+      // Background dual-write to Firestore for robustness
+      firebaseService.saveHeroBanner(banner).catch(err => console.warn("Firebase backup write fail:", err));
+      // Dispatch refresh event to update App.tsx state
+      window.dispatchEvent(new CustomEvent('refresh-mysql-data'));
+    }
+  };
+
+  const deleteHeroBannerLocal = async (id: string) => {
+    if (useFirebase) {
+      await firebaseService.deleteHeroBanner(id);
+    } else {
+      await mysqlClientService.deleteHeroBanner(id);
+      // Background dual-write to Firestore for robustness
+      firebaseService.deleteHeroBanner(id).catch(err => console.warn("Firebase backup delete fail:", err));
+      // Dispatch refresh event to update App.tsx state
+      window.dispatchEvent(new CustomEvent('refresh-mysql-data'));
+    }
+  };
 
   // --- CURRENT CMS CONFIG STATED ---
   const [editingBannerId, setEditingBannerId] = useState<string | null>(null);
@@ -92,6 +121,9 @@ export default function HeroBannerManager({
   
   // Display Mode (Mode 1: Exact, Mode 2: Dynamic, Mode 3: Video, Mode 4: Custom)
   const [displayMode, setDisplayMode] = useState<'Mode1' | 'Mode2' | 'Mode3' | 'Mode4'>('Mode2');
+
+  // Simple image banner only option
+  const [isSimpleImageOnly, setIsSimpleImageOnly] = useState(false);
 
   // Video Banner configuration (Mode 3)
   const [videoSettings, setVideoSettings] = useState({
@@ -173,6 +205,7 @@ export default function HeroBannerManager({
   const [mobileUploading, setMobileUploading] = useState(false);
   const [mobileProgress, setMobileProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [imageWarning, setImageWarning] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const [animations, setAnimations] = useState({
@@ -180,6 +213,8 @@ export default function HeroBannerManager({
     type: 'fade' as 'fade' | 'slide-left' | 'slide-right' | 'zoom' | 'scale',
     duration: 0.8
   });
+
+  const [visualLayoutSettings, setVisualLayoutSettings] = useState<VisualLayoutSettings>(DEFAULT_VISUAL_LAYOUT_SETTINGS);
 
   // Status & Date scheduling
   const [bannerOrder, setBannerOrder] = useState(1);
@@ -274,6 +309,52 @@ export default function HeroBannerManager({
       return;
     }
 
+    setImageWarning(null);
+
+    // Validate image dimensions using FileReader
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const width = img.width;
+        const height = img.height;
+        const aspect = width / height;
+
+        let warningMsg = '';
+        if (target === 'desktop') {
+          const targetAspect = 16 / 9;
+          const deviatesAspect = Math.abs(aspect - targetAspect) > 0.15;
+          const isTooSmall = width < 1600 || height < 900;
+          if (deviatesAspect) {
+            warningMsg += `⚠️ Desktop image aspect ratio (${(width/height).toFixed(2)}) deviates from recommended 16:9. Image might be cropped. `;
+          }
+          if (isTooSmall) {
+            warningMsg += `⚠️ Small desktop image (under 1600x900 px, uploaded: ${width}x${height}). Might look pixelated. `;
+          }
+        } else {
+          const targetAspect = 9 / 16;
+          const deviatesAspect = Math.abs(aspect - targetAspect) > 0.25;
+          const isTooSmall = width < 720 || height < 1280;
+          if (deviatesAspect) {
+            warningMsg += `⚠️ Mobile image aspect ratio (${(width/height).toFixed(2)}) deviates from recommended 9:16 portrait style. `;
+          }
+          if (isTooSmall) {
+            warningMsg += `⚠️ Small mobile image (under 720x1280 px, uploaded: ${width}x${height}). `;
+          }
+        }
+
+        if (file.size > 1.5 * 1024 * 1024) {
+          warningMsg += `⚠️ Large file size (${(file.size / 1024 / 1024).toFixed(1)}MB). Recommend compressing to under 1MB for faster page loads. `;
+        }
+
+        if (warningMsg) {
+          setImageWarning(warningMsg);
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+
     const bannerId = editingBannerId || `banner_${Date.now()}`;
     // Assign a consistent ID if creating a new banner so the storage path is structured
     if (!editingBannerId) {
@@ -365,6 +446,7 @@ export default function HeroBannerManager({
     setBannerBadgeText(banner.badgeText || 'DVARIX REALTY');
     setBannerPropertyCountBadge(banner.propertyCountBadge || '500+ Verified Properties');
     setDisplayMode(banner.displayMode || 'Mode2');
+    setIsSimpleImageOnly(banner.displayMode === 'Mode1');
     
     setBannerDesktopImageMethod(banner.desktopImageMethod || 'url');
     setBannerDesktopImage(banner.desktopImage || '');
@@ -443,6 +525,8 @@ export default function HeroBannerManager({
       duration: 0.8
     });
 
+    setVisualLayoutSettings(banner.visualLayoutSettings || DEFAULT_VISUAL_LAYOUT_SETTINGS);
+
     // Map status values cleanly
     let mappedStatus = banner.status || 'Draft';
     if (mappedStatus === 'active') mappedStatus = 'Published';
@@ -479,6 +563,8 @@ export default function HeroBannerManager({
     setBannerPublishDate('');
     setBannerExpiryDate('');
     setBannerPreviewObject(null);
+    setIsSimpleImageOnly(false);
+    setVisualLayoutSettings(DEFAULT_VISUAL_LAYOUT_SETTINGS);
   };
 
   // Publish Status Trigger
@@ -506,7 +592,7 @@ export default function HeroBannerManager({
             enabled: false,
             lastUpdated: new Date().toISOString()
           };
-          await firebaseService.saveHeroBanner(unpublished);
+          await saveHeroBannerLocal(unpublished);
         }
       } catch (err: any) {
         console.error(`[CMS DIAGNOSTIC ERROR] File: src/components/cms/HeroBannerManager.tsx, Component: HeroBannerManager, Function: handleToggleStatus - Auto-Unpublish, Line: 495, Root Cause: Failed to unpublish previous default banner, Original Error:`, err);
@@ -521,9 +607,9 @@ export default function HeroBannerManager({
     };
 
     try {
-      console.log(`[CMS DIAGNOSTIC] Firestore toggle write start for banner ID: ${banner.id}`);
-      await firebaseService.saveHeroBanner(updatedBanner);
-      console.log(`[CMS DIAGNOSTIC] Firestore toggle write success for banner ID: ${banner.id}`);
+      console.log(`[CMS DIAGNOSTIC] MySQL toggle write start for banner ID: ${banner.id}`);
+      await saveHeroBannerLocal(updatedBanner);
+      console.log(`[CMS DIAGNOSTIC] MySQL toggle write success for banner ID: ${banner.id}`);
       console.log(`[CMS DIAGNOSTIC] List refreshed successfully via subscription.`);
       console.log(`[CMS DIAGNOSTIC] Homepage displays immediately synchronized.`);
 
@@ -549,9 +635,9 @@ export default function HeroBannerManager({
     };
     
     try {
-      console.log(`[CMS DIAGNOSTIC] Firestore duplicate write start. ID: ${newId}`);
-      await firebaseService.saveHeroBanner(newBanner);
-      console.log(`[CMS DIAGNOSTIC] Firestore duplicate write success. ID: ${newId}`);
+      console.log(`[CMS DIAGNOSTIC] MySQL duplicate write start. ID: ${newId}`);
+      await saveHeroBannerLocal(newBanner);
+      console.log(`[CMS DIAGNOSTIC] MySQL duplicate write success. ID: ${newId}`);
       console.log(`[CMS DIAGNOSTIC] List refreshed successfully via subscription.`);
       notify("Slide Duplicated", "Copy added successfully.");
     } catch (error: any) {
@@ -565,9 +651,9 @@ export default function HeroBannerManager({
     if (!confirm("Are you sure you want to delete this premium hero banner?")) return;
     
     try {
-      console.log(`[CMS DIAGNOSTIC] Firestore delete start. ID: ${bannerId}`);
-      await firebaseService.deleteHeroBanner(bannerId);
-      console.log(`[CMS DIAGNOSTIC] Firestore delete success. ID: ${bannerId}`);
+      console.log(`[CMS DIAGNOSTIC] MySQL delete start. ID: ${bannerId}`);
+      await deleteHeroBannerLocal(bannerId);
+      console.log(`[CMS DIAGNOSTIC] MySQL delete success. ID: ${bannerId}`);
       console.log(`[CMS DIAGNOSTIC] List refreshed successfully via subscription.`);
       notify("Slide Deleted", "Banner removed successfully.");
     } catch (error: any) {
@@ -587,12 +673,12 @@ export default function HeroBannerManager({
     bannersList[targetIdx] = temp;
 
     try {
-      console.log(`[CMS DIAGNOSTIC] Firestore batch update start for ordering.`);
+      console.log(`[CMS DIAGNOSTIC] MySQL batch update start for ordering.`);
       const promises = bannersList.map((b, idx) => {
-        return firebaseService.saveHeroBanner({ ...b, order: idx + 1 });
+        return saveHeroBannerLocal({ ...b, order: idx + 1 });
       });
       await Promise.all(promises);
-      console.log(`[CMS DIAGNOSTIC] Firestore batch update success for ordering.`);
+      console.log(`[CMS DIAGNOSTIC] MySQL batch update success for ordering.`);
       console.log(`[CMS DIAGNOSTIC] List refreshed successfully via subscription.`);
       notify("Display Order Updated", "Slide rotators updated.");
     } catch (error: any) {
@@ -610,14 +696,14 @@ export default function HeroBannerManager({
       const promises = heroBanners.map((b) => {
         if (action === 'publish') {
           console.log(`[CMS DIAGNOSTIC] Bulk publishing banner ID: ${b.id}`);
-          return firebaseService.saveHeroBanner({ ...b, status: 'Published', enabled: true, lastUpdated: new Date().toISOString() });
+          return saveHeroBannerLocal({ ...b, status: 'Published', enabled: true, lastUpdated: new Date().toISOString() });
         } else if (action === 'unpublish') {
           console.log(`[CMS DIAGNOSTIC] Bulk unpublishing banner ID: ${b.id}`);
-          return firebaseService.saveHeroBanner({ ...b, status: 'Draft', enabled: false, lastUpdated: new Date().toISOString() });
+          return saveHeroBannerLocal({ ...b, status: 'Draft', enabled: false, lastUpdated: new Date().toISOString() });
         } else {
           if (b.status !== 'Published' && b.status !== 'active') {
             console.log(`[CMS DIAGNOSTIC] Bulk deleting banner ID: ${b.id}`);
-            return firebaseService.deleteHeroBanner(b.id);
+            return deleteHeroBannerLocal(b.id);
           }
         }
         return Promise.resolve();
@@ -638,18 +724,31 @@ export default function HeroBannerManager({
     console.log("[CMS DIAGNOSTIC] 'Publish Banner' button clicked. Editing ID:", editingBannerId);
 
     // 1. Validation of fields (Only essential fields: Banner Title, Main Heading, Background Image, Banner Status)
-    if (!bannerName.trim()) {
-      alert("Banner Title (Administrative Slide Name) is required!");
-      return;
+    let finalBannerName = bannerName;
+    let finalBannerHeadline = bannerHeadline;
+
+    if (isSimpleImageOnly) {
+      if (!bannerDesktopImage.trim()) {
+        alert("Background Image URL is required! Please specify a valid Image URL or upload a file.");
+        return;
+      }
+      finalBannerName = bannerName.trim() || "Simple Image - " + (bannerDesktopImage ? bannerDesktopImage.split('/').pop()?.split('?')[0]?.substring(0, 25) : Date.now());
+      finalBannerHeadline = "Simple Image Banner";
+    } else {
+      if (!bannerName.trim()) {
+        alert("Banner Title (Administrative Slide Name) is required!");
+        return;
+      }
+      if (!bannerHeadline.trim()) {
+        alert("Main Heading (Large Display Headline) is required!");
+        return;
+      }
+      if (!bannerDesktopImage.trim()) {
+        alert("Background Image is required! Please specify a valid Image URL or upload a file.");
+        return;
+      }
     }
-    if (!bannerHeadline.trim()) {
-      alert("Main Heading (Large Display Headline) is required!");
-      return;
-    }
-    if (!bannerDesktopImage.trim()) {
-      alert("Background Image is required! Please specify a valid Image URL or upload a file.");
-      return;
-    }
+
     if (!bannerStatus) {
       alert("Banner Status is required!");
       return;
@@ -668,18 +767,19 @@ export default function HeroBannerManager({
     const createdAt = existing?.createdAt || existing?.lastUpdated || new Date().toISOString();
     const createdBy = existing?.createdBy || auth.currentUser?.email || 'dvarixrealty@gmail.com';
     const statusValue = bannerStatus || 'Draft';
+    const finalDisplayMode = isSimpleImageOnly ? 'Mode1' : displayMode;
 
     const rawBanner: HeroBanner = {
       id: editingBannerId || `banner_${Date.now()}`,
-      bannerName: bannerName,
-      title: bannerName, // Save title for explicit requirements
-      headline: bannerHeadline,
-      highlightText: bannerHighlightText || undefined,
-      subheading: bannerSubheading || undefined,
-      description: bannerDescription,
-      badgeText: bannerBadgeText || 'DVARIX REALTY',
-      propertyCountBadge: bannerPropertyCountBadge || '500+ Verified Properties',
-      displayMode,
+      bannerName: finalBannerName,
+      title: finalBannerName, // Save title for explicit requirements
+      headline: finalBannerHeadline,
+      highlightText: isSimpleImageOnly ? undefined : (bannerHighlightText || undefined),
+      subheading: isSimpleImageOnly ? undefined : (bannerSubheading || undefined),
+      description: isSimpleImageOnly ? '' : bannerDescription,
+      badgeText: isSimpleImageOnly ? '' : (bannerBadgeText || 'DVARIX REALTY'),
+      propertyCountBadge: isSimpleImageOnly ? '' : (bannerPropertyCountBadge || '500+ Verified Properties'),
+      displayMode: finalDisplayMode,
       
       desktopImageMethod: bannerDesktopImageMethod,
       desktopImage: bannerDesktopImage || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80',
@@ -687,31 +787,32 @@ export default function HeroBannerManager({
       mobileImage: bannerMobileImage || bannerDesktopImage || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80',
 
       videoSettings,
-      showStatistics,
-      showSearchBar,
-      showContactForm,
+      showStatistics: isSimpleImageOnly ? false : showStatistics,
+      showSearchBar: isSimpleImageOnly ? false : showSearchBar,
+      showContactForm: isSimpleImageOnly ? false : showContactForm,
 
       canvasSettings,
       backgroundSettings: bgSettings,
       floatingCardSettings,
-      bannerButtons,
-      customLayers,
+      bannerButtons: isSimpleImageOnly ? [] : bannerButtons,
+      customLayers: isSimpleImageOnly ? [] : customLayers,
       seoSettings,
       mediaMeta,
+      visualLayoutSettings,
 
       // High-level explicit structures requested by user
       hero: {
-        displayMode,
-        headline: bannerHeadline,
-        highlightText: bannerHighlightText,
-        subheading: bannerSubheading,
-        description: bannerDescription,
-        badgeText: bannerBadgeText,
-        propertyCountBadge: bannerPropertyCountBadge,
+        displayMode: finalDisplayMode,
+        headline: finalBannerHeadline,
+        highlightText: isSimpleImageOnly ? '' : bannerHighlightText,
+        subheading: isSimpleImageOnly ? '' : bannerSubheading,
+        description: isSimpleImageOnly ? '' : bannerDescription,
+        badgeText: isSimpleImageOnly ? '' : bannerBadgeText,
+        propertyCountBadge: isSimpleImageOnly ? '' : bannerPropertyCountBadge,
         videoSettings,
-        showStatistics,
-        showSearchBar,
-        showContactForm,
+        showStatistics: isSimpleImageOnly ? false : showStatistics,
+        showSearchBar: isSimpleImageOnly ? false : showSearchBar,
+        showContactForm: isSimpleImageOnly ? false : showContactForm,
         floatingCardSettings
       },
       buttons: bannerButtons,
@@ -765,13 +866,13 @@ export default function HeroBannerManager({
             enabled: false,
             lastUpdated: new Date().toISOString()
           };
-          await firebaseService.saveHeroBanner(unpublished);
+          await saveHeroBannerLocal(unpublished);
         }
       }
 
-      console.log(`[CMS DIAGNOSTIC] Firestore write start. Collection: banner_management, Document ID: ${cleanNewBanner.id}`);
-      await firebaseService.saveHeroBanner(cleanNewBanner);
-      console.log(`[CMS DIAGNOSTIC] Firestore write success for banner ID: ${cleanNewBanner.id}`);
+      console.log(`[CMS DIAGNOSTIC] MySQL write start. Document ID: ${cleanNewBanner.id}`);
+      await saveHeroBannerLocal(cleanNewBanner);
+      console.log(`[CMS DIAGNOSTIC] MySQL write success for banner ID: ${cleanNewBanner.id}`);
 
       // Auto-refresh the banner list & update CMS state
       console.log(`[CMS DIAGNOSTIC] Banner list refresh successfully triggered by real-time Firestore subscription.`);
@@ -1045,7 +1146,7 @@ export default function HeroBannerManager({
                               type="button"
                               onClick={async () => {
                                 const updated: HeroBanner = { ...banner, status: 'Archived', enabled: false, lastUpdated: new Date().toISOString() };
-                                await firebaseService.saveHeroBanner(updated);
+                                await saveHeroBannerLocal(updated);
                                 notify("Slide Archived", "Slide status marked as Archived successfully.");
                               }}
                               className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-md text-[10px] font-bold cursor-pointer transition animate-none"
@@ -1128,8 +1229,126 @@ export default function HeroBannerManager({
         {/* RIGHT COLUMN: INTERACTIVE VISUAL HERO BUILDER (8 cols) */}
         <div className="lg:col-span-8 space-y-6" id="luxury-banner-editor-form">
           
-          {/* DISPLAY MODE MULTIPLE presets tab */}
-          <div className="p-4 bg-white border border-slate-200/80 rounded-2xl shadow-xs">
+          {/* INTERFACE TYPE SELECTOR */}
+          <div className="p-4 bg-white border border-slate-200/80 rounded-2xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black text-slate-800 uppercase tracking-wider font-mono">Editor Workspace Mode</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Choose between simplified single-image upload or advanced visual builder</p>
+            </div>
+            <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSimpleImageOnly(false);
+                  if (displayMode === 'Mode1') setDisplayMode('Mode2');
+                }}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${!isSimpleImageOnly ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Advanced Multi-Layer Builder
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSimpleImageOnly(true);
+                  setDisplayMode('Mode1');
+                }}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${isSimpleImageOnly ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Simple Image Banner
+              </button>
+            </div>
+          </div>
+
+          {isSimpleImageOnly ? (
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6 shadow-xs">
+              <div>
+                <h4 className="text-sm font-black text-slate-800 font-mono uppercase tracking-wider border-b border-slate-100 pb-3 mb-4">
+                  Simple Image Banner Configuration
+                </h4>
+              </div>
+
+              {/* Administrative name for reference */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Banner Name (Optional - For administrative reference)</label>
+                <input 
+                  type="text" 
+                  value={bannerName} 
+                  onChange={(e) => setBannerName(e.target.value)}
+                  placeholder="e.g. Summer Campaign Poster"
+                  className="w-full text-xs border border-slate-200 p-2.5 rounded-lg focus:outline-none focus:border-[#10B981]"
+                />
+              </div>
+
+              {/* 1. Banner Image */}
+              <div className="space-y-3">
+                <MediaPicker
+                  label="Banner Image"
+                  value={bannerDesktopImage}
+                  onChange={(url) => setBannerDesktopImage(url)}
+                  folder="banners"
+                  category="Banners"
+                />
+              </div>
+
+              {/* 2. Banner Status & 3. Display Order */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Banner Status</label>
+                  <select 
+                    value={bannerStatus} 
+                    onChange={(e) => setBannerStatus(e.target.value as any)}
+                    className="w-full text-xs border border-slate-200 p-2.5 rounded-lg bg-white focus:outline-none focus:border-[#10B981]"
+                  >
+                    <option value="Draft">Inactive (Draft)</option>
+                    <option value="Published">Active (Published)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Display Order</label>
+                  <input 
+                    type="number" 
+                    min={1}
+                    value={bannerOrder} 
+                    onChange={(e) => setBannerOrder(Number(e.target.value))}
+                    className="w-full text-xs border border-slate-200 p-2.5 rounded-lg focus:outline-none focus:border-[#10B981]"
+                  />
+                </div>
+              </div>
+
+              {/* 4. Publish / Update Button */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                {editingBannerId && (
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition cursor-pointer text-xs font-bold"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSaveBanner}
+                  disabled={isReadOnly || isSaving}
+                  className="px-6 py-2.5 bg-[#10B981] hover:bg-[#0da471] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 shadow-sm"
+                >
+                  {isSaving ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" /> {editingBannerId ? 'Update Banner' : 'Publish Banner'}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* DISPLAY MODE MULTIPLE presets tab */}
+              <div className="p-4 bg-white border border-slate-200/80 rounded-2xl shadow-xs">
             <p className="text-xs font-black text-slate-400 uppercase tracking-wider font-mono mb-3">Banner Format & Rendering Strategy</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {[
@@ -1295,85 +1514,30 @@ export default function HeroBannerManager({
 
                   {/* Backdrop media picker */}
                   <div className="space-y-4 pt-2 border-t border-slate-100">
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center">
-                        <p className="text-[11px] font-bold text-slate-600 block">Desktop slide background image (Method & File/URL)</p>
-                        {desktopUploading && (
-                          <span className="text-[10px] text-emerald-600 font-mono font-bold animate-pulse">Uploading: {desktopProgress}%</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="flex bg-slate-100 rounded-lg p-1 text-xs shrink-0">
-                          <button type="button" onClick={() => setBannerDesktopImageMethod('url')} className={`px-2.5 py-1 rounded-md font-bold transition-all ${bannerDesktopImageMethod === 'url' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}>URL Link</button>
-                          <button type="button" onClick={() => setBannerDesktopImageMethod('upload')} className={`px-2.5 py-1 rounded-md font-bold transition-all ${bannerDesktopImageMethod === 'upload' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}>Local File</button>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          {bannerDesktopImageMethod === 'url' ? (
-                            <input 
-                              type="text" 
-                              value={bannerDesktopImage} 
-                              onChange={(e) => setBannerDesktopImage(e.target.value)}
-                              placeholder="https://images.unsplash.com/..."
-                              className="w-full text-xs border border-slate-200 p-2 rounded-lg font-mono focus:outline-none focus:border-[#10B981]"
-                            />
-                          ) : (
-                            <div className="space-y-1">
-                              <input 
-                                type="file" 
-                                accept="image/*"
-                                onChange={(e) => handleImageUpload(e, 'desktop')}
-                                className="text-xs"
-                              />
-                              {desktopUploading && (
-                                <div className="w-full bg-slate-100 rounded-full h-1 mt-1">
-                                  <div className="bg-[#10B981] h-1 rounded-full transition-all duration-300" style={{ width: `${desktopProgress}%` }}></div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                    <MediaPicker
+                      label="Desktop Slide Background"
+                      value={bannerDesktopImage}
+                      onChange={(url) => setBannerDesktopImage(url)}
+                      folder="banners"
+                      category="Banners"
+                    />
+
+                    <div className="pt-2 border-t border-slate-100">
+                      <MediaPicker
+                        label="Mobile Slide Background"
+                        value={bannerMobileImage}
+                        onChange={(url) => setBannerMobileImage(url)}
+                        folder="banners"
+                        category="Banners"
+                      />
                     </div>
 
-                    <div className="space-y-3 pt-3 border-t border-slate-50">
-                      <div className="flex justify-between items-center">
-                        <p className="text-[11px] font-bold text-slate-600 block">Mobile slide background image (Method & File/URL)</p>
-                        {mobileUploading && (
-                          <span className="text-[10px] text-emerald-600 font-mono font-bold animate-pulse">Uploading: {mobileProgress}%</span>
-                        )}
+                    {imageWarning && (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2 text-xs text-amber-700 font-medium">
+                        <AlertCircle className="w-4.5 h-4.5 shrink-0 mt-0.5" />
+                        <span>{imageWarning}</span>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <div className="flex bg-slate-100 rounded-lg p-1 text-xs shrink-0">
-                          <button type="button" onClick={() => setBannerMobileImageMethod('url')} className={`px-2.5 py-1 rounded-md font-bold transition-all ${bannerMobileImageMethod === 'url' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}>URL Link</button>
-                          <button type="button" onClick={() => setBannerMobileImageMethod('upload')} className={`px-2.5 py-1 rounded-md font-bold transition-all ${bannerMobileImageMethod === 'upload' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}>Local File</button>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          {bannerMobileImageMethod === 'url' ? (
-                            <input 
-                              type="text" 
-                              value={bannerMobileImage} 
-                              onChange={(e) => setBannerMobileImage(e.target.value)}
-                              placeholder="https://images.unsplash.com/..."
-                              className="w-full text-xs border border-slate-200 p-2 rounded-lg font-mono focus:outline-none focus:border-[#10B981]"
-                            />
-                          ) : (
-                            <div className="space-y-1">
-                              <input 
-                                type="file" 
-                                accept="image/*"
-                                onChange={(e) => handleImageUpload(e, 'mobile')}
-                                className="text-xs"
-                              />
-                              {mobileUploading && (
-                                <div className="w-full bg-slate-100 rounded-full h-1 mt-1">
-                                  <div className="bg-[#10B981] h-1 rounded-full transition-all duration-300" style={{ width: `${mobileProgress}%` }}></div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                    )}
 
                     {uploadError && (
                       <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs text-red-600 font-medium">
@@ -1485,6 +1649,626 @@ export default function HeroBannerManager({
                     bgSettings={bgSettings}
                     onChangeBg={setBgSettings}
                   />
+                </div>
+              )}
+            </div>
+
+            {/* 4.6 VISUAL LAYOUT CUSTOMIZATION PANEL */}
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+              <button 
+                type="button"
+                onClick={() => setActiveAccordion(activeAccordion === 'visual-layout' ? null : 'visual-layout')}
+                className="w-full px-5 py-4 bg-slate-50/30 hover:bg-slate-50/50 flex items-center justify-between text-left focus:outline-none"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Palette className="w-4 h-4 text-slate-600" />
+                  <p className="text-xs font-black text-slate-700 uppercase tracking-widest font-mono">4.5. Visual Layout & Theme Settings</p>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${activeAccordion === 'visual-layout' ? 'rotate-180' : ''}`} />
+              </button>
+
+              {activeAccordion === 'visual-layout' && (
+                <div className="p-5 border-t border-slate-100 space-y-6 text-xs text-slate-700">
+                  {/* Banner Size */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Banner Size</h5>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Banner Width</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.bannerWidth} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, bannerWidth: e.target.value})}
+                          placeholder="e.g. 100% or 1200px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Banner Height</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.bannerHeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, bannerHeight: e.target.value})}
+                          placeholder="e.g. 650px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Max Width</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.maxWidth} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, maxWidth: e.target.value})}
+                          placeholder="e.g. 100% or 1440px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Min Height</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.minHeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, minHeight: e.target.value})}
+                          placeholder="e.g. 400px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Responsive Heights */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Responsive Heights</h5>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1 flex items-center gap-1"><Monitor className="w-3 h-3 text-slate-400" /> Desktop</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.desktopHeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, desktopHeight: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1 flex items-center gap-1"><Monitor className="w-3 h-3 text-slate-400" /> Laptop</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.laptopHeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, laptopHeight: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1 flex items-center gap-1"><Tablet className="w-3 h-3 text-slate-400" /> Tablet</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.tabletHeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, tabletHeight: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1 flex items-center gap-1"><Phone className="w-3 h-3 text-slate-400" /> Mobile</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.mobileHeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, mobileHeight: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Spacing */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Spacing (Padding & Margin)</h5>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Padding Top</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.paddingTop} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, paddingTop: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Padding Right</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.paddingRight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, paddingRight: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Padding Bottom</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.paddingBottom} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, paddingBottom: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Padding Left</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.paddingLeft} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, paddingLeft: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Margin Top</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.marginTop} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, marginTop: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Margin Right</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.marginRight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, marginRight: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Margin Bottom</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.marginBottom} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, marginBottom: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Margin Left</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.marginLeft} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, marginLeft: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Border */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Border Settings</h5>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Border Radius</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.borderRadius} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, borderRadius: e.target.value})}
+                          placeholder="e.g. 12px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Border Width</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.borderWidth} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, borderWidth: e.target.value})}
+                          placeholder="e.g. 1px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Border Color</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.borderColor} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, borderColor: e.target.value})}
+                          placeholder="e.g. #e2e8f0"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Background Overrides */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Background Overrides</h5>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Position</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.backgroundPosition} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, backgroundPosition: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Size</label>
+                        <select 
+                          value={visualLayoutSettings.backgroundSize} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, backgroundSize: e.target.value as any})}
+                          className="w-full border border-slate-200 p-2 rounded-lg bg-white focus:outline-none text-xs focus:border-[#10B981]"
+                        >
+                          <option value="cover">Cover</option>
+                          <option value="contain">Contain</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Repeat</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.backgroundRepeat} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, backgroundRepeat: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Attachment</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.backgroundAttachment} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, backgroundAttachment: e.target.value})}
+                          placeholder="scroll or fixed"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Overlay Color</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.overlayColor} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, overlayColor: e.target.value})}
+                          placeholder="e.g. #000000"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Overlay Opacity (%)</label>
+                        <input 
+                          type="number" 
+                          min={0} 
+                          max={100}
+                          value={visualLayoutSettings.overlayOpacity} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, overlayOpacity: Number(e.target.value)})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 pt-5">
+                        <input 
+                          type="checkbox" 
+                          checked={visualLayoutSettings.enableParallax} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, enableParallax: e.target.checked})}
+                          className="rounded text-emerald-500"
+                        />
+                        <label className="text-[10px] font-bold text-slate-600">Enable Parallax Effect</label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Content Layout */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Content Placement & Grid</h5>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Content Width</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.contentWidth} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, contentWidth: e.target.value})}
+                          placeholder="e.g. 650px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Horizontal Align</label>
+                        <select 
+                          value={visualLayoutSettings.contentHorizontalAlign} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, contentHorizontalAlign: e.target.value as any})}
+                          className="w-full border border-slate-200 p-2 rounded-lg bg-white focus:outline-none text-xs focus:border-[#10B981]"
+                        >
+                          <option value="left">Left</option>
+                          <option value="center">Center</option>
+                          <option value="right">Right</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Vertical Align</label>
+                        <select 
+                          value={visualLayoutSettings.contentVerticalAlign} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, contentVerticalAlign: e.target.value as any})}
+                          className="w-full border border-slate-200 p-2 rounded-lg bg-white focus:outline-none text-xs focus:border-[#10B981]"
+                        >
+                          <option value="top">Top</option>
+                          <option value="center">Center</option>
+                          <option value="bottom">Bottom</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Content Padding</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.contentPadding} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, contentPadding: e.target.value})}
+                          placeholder="e.g. 20px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Gap Between Elements</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.gapBetweenElements} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, gapBetweenElements: e.target.value})}
+                          placeholder="e.g. 20px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Typography overrides */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Typography Customization</h5>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Title Size</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.titleFontSize} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, titleFontSize: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Subtitle Size</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.subtitleFontSize} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, subtitleFontSize: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Desc Size</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.descriptionFontSize} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, descriptionFontSize: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Font Weight</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.fontWeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, fontWeight: e.target.value})}
+                          placeholder="e.g. 800"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Line Height</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.lineHeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, lineHeight: e.target.value})}
+                          placeholder="e.g. 1.2"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Letter Spacing</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.letterSpacing} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, letterSpacing: e.target.value})}
+                          placeholder="e.g. -0.02em"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Text Color</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.textColor} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, textColor: e.target.value})}
+                          placeholder="e.g. #ffffff"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CTA Buttons */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Primary Button Customization</h5>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Width</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnPrimaryWidth} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnPrimaryWidth: e.target.value})}
+                          placeholder="e.g. auto or 100%"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Height</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnPrimaryHeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnPrimaryHeight: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">BG Color</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnBgColor} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnBgColor: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Text Color</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnTextColor} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnTextColor: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Padding</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnPadding} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnPadding: e.target.value})}
+                          placeholder="e.g. 14px 28px"
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Border Radius</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnBorderRadius} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnBorderRadius: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Secondary Button */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Secondary Button Customization</h5>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Width</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnSecondaryWidth} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnSecondaryWidth: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Height</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnSecondaryHeight} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnSecondaryHeight: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Hover BG</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnHoverBgColor} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnHoverBgColor: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Hover Text</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.btnHoverTextColor} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, btnHoverTextColor: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Animations */}
+                  <div className="space-y-3">
+                    <h5 className="font-bold text-slate-800 border-b border-slate-100 pb-1 uppercase tracking-wider text-[11px]">Animations & FX overlays</h5>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Type</label>
+                        <select 
+                          value={visualLayoutSettings.animationType} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, animationType: e.target.value as any})}
+                          className="w-full border border-slate-200 p-2 rounded-lg bg-white focus:outline-none text-xs focus:border-[#10B981]"
+                        >
+                          <option value="fade">Fade In</option>
+                          <option value="slide-up">Slide Up</option>
+                          <option value="slide-left">Slide Left</option>
+                          <option value="zoom">Zoom</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Duration</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.animationDuration} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, animationDuration: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Delay</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.animationDelay} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, animationDelay: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3 pt-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Container Width</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.containerWidth} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, containerWidth: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Box Shadow</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.boxShadow} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, boxShadow: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Blur Effect FX</label>
+                        <input 
+                          type="text" 
+                          value={visualLayoutSettings.blurEffect} 
+                          onChange={(e) => setVisualLayoutSettings({...visualLayoutSettings, blurEffect: e.target.value})}
+                          className="w-full border border-slate-200 p-2 rounded-lg font-mono text-xs focus:outline-none focus:border-[#10B981]"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -1748,6 +2532,8 @@ export default function HeroBannerManager({
               )}
             </div>
           </div>
+          </>
+          )}
 
           {/* REAL TIME VISUAL HERO PREVIEW IF TRIGGERED */}
           {bannerPreviewObject && (

@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { mysqlClientService } from '../lib/mysqlClientService';
 import { 
   FileText, Search, Filter, Upload, Download, Eye, CheckCircle2, 
   XCircle, Trash2, Edit2, Share2, Printer, RefreshCw, Archive, 
@@ -244,6 +245,21 @@ export default function SaaSDocumentsModule({
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
+  // Load documents from Hostinger MySQL parallel database
+  useEffect(() => {
+    async function fetchDocs() {
+      try {
+        const mysqlDocs = await mysqlClientService.getDocuments();
+        if (mysqlDocs && mysqlDocs.length > 0) {
+          setDocuments(mysqlDocs);
+        }
+      } catch (err) {
+        console.warn("⚠️ Failed to load documents from Hostinger MySQL:", err);
+      }
+    }
+    fetchDocs();
+  }, []);
+
   // Computations
   const computedDaysRemaining = (dateStr?: string) => {
     if (!dateStr) return null;
@@ -307,7 +323,7 @@ export default function SaaSDocumentsModule({
     setDocuments(prev => prev.map(d => {
       if (d.id === id) {
         const timestamp = new Date().toLocaleString();
-        return {
+        const updatedDoc = {
           ...d,
           status: 'Verified',
           verifiedBy: 'Dvarix Super Admin',
@@ -317,6 +333,9 @@ export default function SaaSDocumentsModule({
             { timestamp, action: 'Document Approved & Verified', user: 'Dvarix Super Admin', notes: notes || 'Legally cleared.' }
           ]
         };
+        // Dual-write to MySQL parallel database
+        mysqlClientService.saveDocument(updatedDoc);
+        return updatedDoc as CRMDocument;
       }
       return d;
     }));
@@ -330,7 +349,7 @@ export default function SaaSDocumentsModule({
     setDocuments(prev => prev.map(d => {
       if (d.id === id) {
         const timestamp = new Date().toLocaleString();
-        return {
+        const updatedDoc = {
           ...d,
           status: 'Rejected',
           verifiedBy: 'Dvarix Super Admin',
@@ -340,6 +359,9 @@ export default function SaaSDocumentsModule({
             { timestamp, action: 'Document Rejected', user: 'Dvarix Super Admin', notes: reason }
           ]
         };
+        // Dual-write to MySQL parallel database
+        mysqlClientService.saveDocument(updatedDoc);
+        return updatedDoc as CRMDocument;
       }
       return d;
     }));
@@ -355,7 +377,7 @@ export default function SaaSDocumentsModule({
     setDocuments(prev => prev.map(d => {
       if (d.id === id) {
         const timestamp = new Date().toLocaleString();
-        return {
+        const updatedDoc = {
           ...d,
           status: 'Deleted',
           history: [
@@ -363,6 +385,9 @@ export default function SaaSDocumentsModule({
             { timestamp, action: 'Moved to Trash Bin (Soft Deleted)', user: 'Dvarix Super Admin' }
           ]
         };
+        // Dual-write to MySQL parallel database
+        mysqlClientService.saveDocument(updatedDoc);
+        return updatedDoc as CRMDocument;
       }
       return d;
     }));
@@ -375,6 +400,8 @@ export default function SaaSDocumentsModule({
   const handlePermanentRemove = (id: string) => {
     if (confirm(`Are you sure you want to permanently remove document ${id} from system vaults? This is irreversible.`)) {
       setDocuments(prev => prev.filter(d => d.id !== id));
+      // Delete from MySQL parallel database
+      mysqlClientService.deleteDocument(id);
       triggerNotice(`Permanently deleted document ${id}.`);
     }
   };
@@ -383,7 +410,7 @@ export default function SaaSDocumentsModule({
     setDocuments(prev => prev.map(d => {
       if (d.id === id) {
         const timestamp = new Date().toLocaleString();
-        return {
+        const updatedDoc = {
           ...d,
           status: 'Archived',
           history: [
@@ -391,6 +418,9 @@ export default function SaaSDocumentsModule({
             { timestamp, action: 'Document Archived', user: 'Dvarix Super Admin' }
           ]
         };
+        // Dual-write to MySQL parallel database
+        mysqlClientService.saveDocument(updatedDoc);
+        return updatedDoc as CRMDocument;
       }
       return d;
     }));
@@ -401,7 +431,7 @@ export default function SaaSDocumentsModule({
     setDocuments(prev => prev.map(d => {
       if (d.id === id) {
         const timestamp = new Date().toLocaleString();
-        return {
+        const updatedDoc = {
           ...d,
           status: 'Uploaded',
           history: [
@@ -409,6 +439,9 @@ export default function SaaSDocumentsModule({
             { timestamp, action: 'Restored from Archives/Trash', user: 'Dvarix Super Admin' }
           ]
         };
+        // Dual-write to MySQL parallel database
+        mysqlClientService.saveDocument(updatedDoc);
+        return updatedDoc as CRMDocument;
       }
       return d;
     }));
@@ -454,6 +487,8 @@ export default function SaaSDocumentsModule({
     };
 
     setDocuments(prev => [newDoc, ...prev]);
+    // Dual-write to MySQL parallel database
+    mysqlClientService.saveDocument(newDoc);
     triggerNotice(`Uploaded document ${newDocName} assigned ID ${docId}.`);
     
     // Reset Form
@@ -473,7 +508,7 @@ export default function SaaSDocumentsModule({
       if (d.id === id) {
         const timestamp = new Date().toLocaleString();
         const nextVer = d.version + 1;
-        return {
+        const updatedDoc = {
           ...d,
           name: fileName ? `Replaced - ${fileName}` : d.name,
           version: nextVer,
@@ -484,6 +519,9 @@ export default function SaaSDocumentsModule({
             { timestamp, action: `Uploaded & Replaced Version ${nextVer}`, user: 'Dvarix Super Admin' }
           ]
         };
+        // Dual-write to MySQL parallel database
+        mysqlClientService.saveDocument(updatedDoc);
+        return updatedDoc as CRMDocument;
       }
       return d;
     }));

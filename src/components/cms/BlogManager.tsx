@@ -5,6 +5,7 @@ import {
   MessageSquare, Sliders, Globe, EyeOff, Save, FolderOpen, RefreshCw, Sparkles, AlertCircle
 } from 'lucide-react';
 import { BlogArticle, SiteCMSConfig, BlogComment } from '../../types';
+import MediaPicker from '../MediaPicker';
 
 interface BlogManagerProps {
   siteSettings?: SiteCMSConfig;
@@ -1012,24 +1013,13 @@ export default function BlogManager({ siteSettings, setSiteSettings }: BlogManag
 
                       {/* Featured Image */}
                       <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-black text-slate-500 block">Featured Cover Image URL</label>
-                        <input 
-                          type="text"
-                          placeholder="https://images.unsplash.com/..."
-                          value={editingArticle.featuredImage || ''}
-                          onChange={(e) => setEditingArticle(prev => ({ ...prev, featuredImage: e.target.value }))}
-                          className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-[11px] font-mono text-slate-700 placeholder-slate-400 focus:outline-none"
+                        <MediaPicker
+                          label="Featured Cover Image"
+                          value={editingArticle.featuredImage || ""}
+                          onChange={(url) => setEditingArticle(prev => ({ ...prev, featuredImage: url }))}
+                          folder="blogs"
+                          category="Blogs"
                         />
-                        {editingArticle.featuredImage && (
-                          <img 
-                            src={editingArticle.featuredImage} 
-                            alt="" 
-                            className="w-full h-24 rounded-lg object-cover border border-slate-200 mt-2"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
-                            }}
-                          />
-                        )}
                       </div>
 
                       {/* Author */}

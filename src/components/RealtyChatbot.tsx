@@ -20,8 +20,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CustomRequirement, Property, FAQ } from '../types';
-import { db } from '../firebase';
-import { doc, onSnapshot, collection, query } from 'firebase/firestore';
+import { db, OperationType, handleFirestoreError } from '../firebase';
+import { doc, onSnapshot, collection, query, setDoc } from 'firebase/firestore';
+import { CACHE_KEYS, getLocalCache, setLocalCache } from '../utils/localStorageCache';
 
 interface RealtyChatbotProps {
   onAddRequirement: (data: Omit<CustomRequirement, 'id' | 'status' | 'date'>) => void;
@@ -52,22 +53,26 @@ export default function RealtyChatbot({
   const [inputText, setInputText] = useState('');
   
   // Dynamic knowledge sources populated from Firestore real-time streams
-  const [dbKnowledge, setDbKnowledge] = useState<any[]>([]);
-  const [dbDocuments, setDbDocuments] = useState<any[]>([]);
-  const [dbWebsites, setDbWebsites] = useState<any[]>([]);
-  const [dbSnippets, setDbSnippets] = useState<any[]>([]);
+  const [dbKnowledge, setDbKnowledge] = useState<any[]>(() => getLocalCache(CACHE_KEYS.KNOWLEDGE, []));
+  const [dbDocuments, setDbDocuments] = useState<any[]>(() => getLocalCache(CACHE_KEYS.DOCUMENTS, []));
+  const [dbWebsites, setDbWebsites] = useState<any[]>(() => getLocalCache(CACHE_KEYS.WEBSITES, []));
+  const [dbSnippets, setDbSnippets] = useState<any[]>(() => getLocalCache(CACHE_KEYS.SNIPPETS, []));
 
   // Real-time Widget Configuration from Firestore
-  const [dbConfig, setDbConfig] = useState<any>({
-    botName: 'Dvarix AI Assistant',
-    botMission: 'Understand customer requirements naturally and help guide them through premium real estate solutions.',
-    style: 'Warm',
-    introMessage: 'Hello! Welcome to Dvarix Realty. How can I help you explore plots, luxury villas, apartments, or premium services today? 🏠',
-    avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150',
-    primaryColor: '#ff5a3c',
-    welcomeMessage: 'Hi there! Looking for your dream property? Let\'s chat!',
-    showBranding: true,
-    intelligenceMode: true
+  const [dbConfig, setDbConfig] = useState<any>(() => {
+    const defaults = {
+      botName: 'Dvarix AI Assistant',
+      botMission: 'Understand customer requirements naturally and help guide them through premium real estate solutions.',
+      style: 'Warm',
+      introMessage: 'Hello! Welcome to Dvarix Realty. How can I help you explore plots, luxury villas, apartments, or premium services today? 🏠',
+      avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150',
+      primaryColor: '#ff5a3c',
+      welcomeMessage: 'Hi there! Looking for your dream property? Let\'s chat!',
+      showBranding: true,
+      intelligenceMode: true
+    };
+    const cached = getLocalCache(CACHE_KEYS.CONFIG, null);
+    return cached ? { ...defaults, ...cached } : defaults;
   });
 
   // Lead Collection State
@@ -82,11 +87,117 @@ export default function RealtyChatbot({
     customNote: ''
   });
 
+  // Real-time conversation tracking coordinates
+  const [conversationId, setConversationId] = useState<string>('');
+  const [sessionId, setSessionId] = useState<string>('');
+  const [visitorId, setVisitorId] = useState<string>('');
+
   // Dynamic Conversation Flows state
   const [activeFlows, setActiveFlows] = useState<any[]>([]);
   const [currentFlow, setCurrentFlow] = useState<any>(null);
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [flowResponses, setFlowResponses] = useState<Record<string, any>>({});
+
+  // Auto-initialize coordinates on mount
+  useEffect(() => {
+    let sId = sessionStorage.getItem('dvarix_chat_session_id');
+    let vId = localStorage.getItem('dvarix_chat_visitor_id');
+    let cId = sessionStorage.getItem('dvarix_chat_conversation_id');
+    
+    if (!sId) {
+      sId = 'sess-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+      sessionStorage.setItem('dvarix_chat_session_id', sId);
+    }
+    if (!vId) {
+      vId = 'vis-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+      localStorage.setItem('dvarix_chat_visitor_id', vId);
+    }
+    if (!cId) {
+      cId = 'conv-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+      sessionStorage.setItem('dvarix_chat_conversation_id', cId);
+    }
+    
+    setSessionId(sId);
+    setVisitorId(vId);
+    setConversationId(cId);
+  }, []);
+
+  // Sync collected customer lead to customer_requirements Firestore collection
+  const syncLeadToFirestore = async () => {
+    const name = leadForm.fullName || flowResponses.fullName || flowResponses.name || flowResponses.firstName || '';
+    const phone = leadForm.mobileNumber || flowResponses.mobileNumber || flowResponses.phone || flowResponses.phoneNumber || '';
+    const email = flowResponses.emailAddress || flowResponses.email || '';
+    const location = leadForm.preferredLocation || flowResponses.preferredLocation || flowResponses.location || '';
+    const propType = flowResponses.propertyType || flowResponses.type || '';
+    const budget = leadForm.budgetRange || flowResponses.budgetRange || flowResponses.budget || '';
+    const bedrooms = flowResponses.bhkRequirement || flowResponses.bedrooms || 'Flexible';
+    const area = flowResponses.plotSize || flowResponses.area || 'Flexible';
+
+    if (!name || !phone) {
+      // Do not write anything if minimum useful information is missing
+      return;
+    }
+
+    let storedLeadId = sessionStorage.getItem('dvarix_lead_id');
+    if (!storedLeadId) {
+      storedLeadId = 'lead-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+      sessionStorage.setItem('dvarix_lead_id', storedLeadId);
+    }
+
+    let leadStatus = 'New';
+    if (leadStep === 'DONE') {
+      leadStatus = 'Contacted';
+    }
+
+    let priority = 'Medium';
+    if (budget.includes('Cr') || budget.includes('Luxury') || budget.includes('3 Crores+')) {
+      priority = 'High';
+    }
+
+    // AI summary generation
+    const requirementSummary = `Customer ${name} is looking for a ${bedrooms !== 'Flexible' ? bedrooms + ' ' : ''}${propType || 'property'} in ${location || 'any location'} with a budget of ${budget || 'Flexible'}. Contact number: ${phone}.${email ? ` Email: ${email}.` : ''}`;
+
+    const docPayload = {
+      leadId: storedLeadId,
+      sessionId,
+      visitorId,
+      customerName: name,
+      phoneNumber: phone,
+      email: email,
+      preferredLocation: location || 'Bangalore',
+      propertyType: propType || 'Consultation',
+      budget: budget || 'Flexible',
+      bedrooms: bedrooms,
+      area: area,
+      requirementSummary,
+      leadStatus,
+      priority,
+      source: 'AI Chatbot',
+      createdAt: sessionStorage.getItem('dvarix_lead_created_at') || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (!sessionStorage.getItem('dvarix_lead_created_at')) {
+      sessionStorage.setItem('dvarix_lead_created_at', docPayload.createdAt);
+    }
+
+    try {
+      await setDoc(doc(db, 'customer_requirements', storedLeadId), docPayload);
+      console.log("[SyncLeadToFirestore] Saved lead details to customer_requirements:", storedLeadId);
+    } catch (error: any) {
+      console.error("[SyncLeadToFirestore] Error writing to customer_requirements:", error);
+      if (error?.code === 'resource-exhausted') {
+        console.warn("[SyncLeadToFirestore] Quota exceeded. Saved to memory only.");
+      } else {
+        handleFirestoreError(error, OperationType.WRITE, `customer_requirements/${storedLeadId}`);
+      }
+    }
+  };
+
+  // Synchronize lead state to Firestore in real-time when inputs are populated
+  useEffect(() => {
+    syncLeadToFirestore();
+  }, [leadForm, flowResponses, leadStep, sessionId, visitorId]);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -95,7 +206,11 @@ export default function RealtyChatbot({
     const unsubConfig = onSnapshot(doc(db, 'chatbot_settings', 'config'), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
-        setDbConfig((prev: any) => ({ ...prev, ...data }));
+        setDbConfig((prev: any) => {
+          const merged = { ...prev, ...data };
+          setLocalCache(CACHE_KEYS.CONFIG, merged);
+          return merged;
+        });
       }
     }, (err) => {
       console.warn("Could not load real-time chatbot config:", err);
@@ -105,24 +220,28 @@ export default function RealtyChatbot({
       const list: any[] = [];
       snap.forEach(d => list.push({ id: d.id, ...d.data() }));
       setDbKnowledge(list);
+      setLocalCache(CACHE_KEYS.KNOWLEDGE, list);
     }, (err) => console.warn("Could not sync Q&A:", err));
 
     const unsubDocs = onSnapshot(query(collection(db, 'chatbot_documents')), (snap) => {
       const list: any[] = [];
       snap.forEach(d => list.push({ id: d.id, ...d.data() }));
       setDbDocuments(list);
+      setLocalCache(CACHE_KEYS.DOCUMENTS, list);
     }, (err) => console.warn("Could not sync Documents:", err));
 
     const unsubWebsites = onSnapshot(query(collection(db, 'chatbot_websites')), (snap) => {
       const list: any[] = [];
       snap.forEach(d => list.push({ id: d.id, ...d.data() }));
       setDbWebsites(list);
+      setLocalCache(CACHE_KEYS.WEBSITES, list);
     }, (err) => console.warn("Could not sync Websites:", err));
 
     const unsubSnippets = onSnapshot(query(collection(db, 'chatbot_snippets')), (snap) => {
       const list: any[] = [];
       snap.forEach(d => list.push({ id: d.id, ...d.data() }));
       setDbSnippets(list);
+      setLocalCache(CACHE_KEYS.SNIPPETS, list);
     }, (err) => console.warn("Could not sync Snippets:", err));
 
     const unsubFlows = onSnapshot(query(collection(db, 'chatbot_flows')), (snap) => {
@@ -134,6 +253,7 @@ export default function RealtyChatbot({
         }
       });
       setActiveFlows(list);
+      setLocalCache(CACHE_KEYS.FLOWS, list);
     }, (err) => console.warn("Could not sync Chatbot Flows:", err));
 
     return () => {

@@ -5,6 +5,7 @@ import {
   ChevronRight, Calendar, Clock, BarChart3, Database, Save, Activity
 } from 'lucide-react';
 import { Agent, Property, CRMLead } from '../types';
+import MediaPicker from './MediaPicker';
 
 interface SaaSForceModuleProps {
   agents: Agent[];
@@ -539,11 +540,12 @@ export default function SaaSForceModule({
               </div>
 
               <div className="space-y-1">
-                <label className="font-extrabold text-slate-450 uppercase block">Avatar Photo URL</label>
-                <input
-                  type="text" value={newAgentAvatar}
-                  onChange={(e) => setNewAgentAvatar(e.target.value)}
-                  className="w-full border border-slate-200 p-2.5 rounded-lg text-xs font-mono"
+                <MediaPicker
+                  label="Avatar Photo"
+                  value={newAgentAvatar}
+                  onChange={(url) => setNewAgentAvatar(url)}
+                  folder="agents"
+                  category="Agents"
                 />
               </div>
             </div>

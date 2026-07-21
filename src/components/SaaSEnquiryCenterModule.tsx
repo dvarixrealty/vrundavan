@@ -7,6 +7,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { CentralEnquiry, RoutingRule, Agent, CRMLead, Property } from '../types';
 import { firebaseService } from '../lib/firebaseService';
+import { mysqlClientService } from '../lib/mysqlClientService';
 import { parseUtmParameters, detectDeviceAndOS, createVisitorJourney, routeEnquiryAutomatically } from '../utils/enquiryHelper';
 
 // Import modular components
@@ -508,6 +509,8 @@ export default function SaaSEnquiryCenterModule({
         convertedLeadId: updated.convertedLeadId
       };
       await firebaseService.saveRequirement(originalReq);
+      // Dual-write to MySQL
+      await mysqlClientService.saveRequirement(originalReq);
     } else {
       // Native CentralEnquiry document
       const { _collection, ...cleanData } = updated;
@@ -567,6 +570,8 @@ export default function SaaSEnquiryCenterModule({
       await firebaseService.deleteInquiry(enq.id);
     } else if (colType === 'requirements') {
       await firebaseService.deleteRequirement(enq.id);
+      // Dual-write delete to MySQL
+      await mysqlClientService.deleteRequirement(enq.id);
     } else {
       await firebaseService.deleteCentralEnquiry(enq.id);
     }
@@ -590,6 +595,8 @@ export default function SaaSEnquiryCenterModule({
     };
 
     await firebaseService.saveRoutingRule(newRule);
+    // Dual-write rule to MySQL
+    await mysqlClientService.saveQualificationRule(newRule);
     setRuleAgent('');
     triggerToast("Routing Rule Created", `Automation rule set up for source "${ruleSource}".`);
   };
@@ -597,6 +604,8 @@ export default function SaaSEnquiryCenterModule({
   const handleDeleteRule = async (id: string) => {
     if (confirm("Permanently remove this automatic routing rule?")) {
       await firebaseService.deleteRoutingRule(id);
+      // Dual-write delete to MySQL
+      await mysqlClientService.deleteQualificationRule(id);
       triggerToast("Rule Removed", "The routing category has been deleted.");
     }
   };

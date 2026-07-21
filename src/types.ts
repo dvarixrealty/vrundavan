@@ -204,6 +204,30 @@ export interface Property {
   ownerName?: string;
   ownerContact?: string;
   
+  // Enterprise PMS Workspace Fields
+  slug?: string;
+  longDescription?: string;
+  visibility?: string;
+  visibilityPassword?: string;
+  droneImages?: string[];
+  videos?: string[];
+  tours360?: string[];
+  layoutPlans?: string[];
+  customSpecs?: any[];
+  nearbyPlaces?: any[];
+  floorPlans?: any[];
+  legal?: any;
+  pricing?: any;
+  investment?: any;
+  documents?: any[];
+  mediaUrls?: any;
+  agentExtra?: any;
+  reviewsList?: any[];
+  propertyFaqs?: any[];
+  faqs?: any[];
+  seo?: any;
+  appearance?: any;
+  
   // Lifecycle fields
   isArchived?: boolean;
   isTrashed?: boolean;
@@ -239,6 +263,7 @@ export interface Inquiry {
   date: string;
   status: 'New' | 'In Progress' | 'Contacted' | 'Archived';
   preferredTime?: string;
+  contactMethod?: 'Phone' | 'WhatsApp' | 'Email';
 }
 
 export interface LocationData {
@@ -276,7 +301,7 @@ export interface CustomRequirement {
   submissionType?: 'Requirement' | 'Consultation' | 'Site Visit';
 }
 
-export type ActiveTab = 'Home' | 'Properties' | 'Contact' | 'Admin' | 'About' | 'PrivacyPolicy' | 'Terms' | 'Insights';
+export type ActiveTab = 'Home' | 'Properties' | 'Contact' | 'Admin' | 'About' | 'PrivacyPolicy' | 'Terms' | 'Insights' | '404' | 'PropertyDetail';
 
 export interface BlogComment {
   id: string;
@@ -879,9 +904,152 @@ export interface HeroBanner {
     duration?: number; // seconds
   };
 
+  visualLayoutSettings?: VisualLayoutSettings;
+
   // Dynamic CMS custom builder properties
   [key: string]: any;
 }
+
+export interface VisualLayoutSettings {
+  // Banner Size
+  bannerWidth: string;
+  bannerHeight: string;
+  maxWidth: string;
+  minHeight: string;
+
+  // Responsive Heights
+  desktopHeight: string;
+  laptopHeight: string;
+  tabletHeight: string;
+  mobileHeight: string;
+
+  // Spacing
+  paddingTop: string;
+  paddingRight: string;
+  paddingBottom: string;
+  paddingLeft: string;
+  marginTop: string;
+  marginRight: string;
+  marginBottom: string;
+  marginLeft: string;
+
+  // Border
+  borderRadius: string;
+  borderWidth: string;
+  borderColor: string;
+
+  // Background
+  backgroundPosition: string;
+  backgroundSize: 'cover' | 'contain';
+  backgroundRepeat: string;
+  backgroundAttachment: string;
+  overlayColor: string;
+  overlayOpacity: number;
+  enableParallax: boolean;
+
+  // Content Layout
+  contentWidth: string;
+  contentHorizontalAlign: 'left' | 'center' | 'right';
+  contentVerticalAlign: 'top' | 'center' | 'bottom';
+  contentPadding: string;
+  gapBetweenElements: string;
+
+  // Typography
+  titleFontSize: string;
+  subtitleFontSize: string;
+  descriptionFontSize: string;
+  fontWeight: string;
+  lineHeight: string;
+  letterSpacing: string;
+  textColor: string;
+
+  // Buttons
+  btnPrimaryWidth: string;
+  btnPrimaryHeight: string;
+  btnSecondaryWidth: string;
+  btnSecondaryHeight: string;
+  btnBorderRadius: string;
+  btnPadding: string;
+  btnBgColor: string;
+  btnTextColor: string;
+  btnHoverBgColor: string;
+  btnHoverTextColor: string;
+
+  // Animation
+  animationEnabled: boolean;
+  animationType: string;
+  animationDuration: string;
+  animationDelay: string;
+
+  // Advanced
+  fullWidth: boolean;
+  containerWidth: string;
+  boxShadow: string;
+  blurEffect: string;
+  zIndex: string;
+  overflowControl: string;
+}
+
+export const DEFAULT_VISUAL_LAYOUT_SETTINGS: VisualLayoutSettings = {
+  bannerWidth: '100%',
+  bannerHeight: '650px',
+  maxWidth: '100%',
+  minHeight: '400px',
+  desktopHeight: '650px',
+  laptopHeight: '550px',
+  tabletHeight: '450px',
+  mobileHeight: '380px',
+  paddingTop: '60px',
+  paddingRight: '24px',
+  paddingBottom: '60px',
+  paddingLeft: '24px',
+  marginTop: '0px',
+  marginRight: '0px',
+  marginBottom: '0px',
+  marginLeft: '0px',
+  borderRadius: '0px',
+  borderWidth: '0px',
+  borderColor: 'transparent',
+  backgroundPosition: 'center',
+  backgroundSize: 'cover',
+  backgroundRepeat: 'no-repeat',
+  backgroundAttachment: 'scroll',
+  overlayColor: '#040914',
+  overlayOpacity: 65,
+  enableParallax: false,
+  contentWidth: '650px',
+  contentHorizontalAlign: 'left',
+  contentVerticalAlign: 'center',
+  contentPadding: '0px',
+  gapBetweenElements: '20px',
+  titleFontSize: '2.75rem',
+  subtitleFontSize: '1.25rem',
+  descriptionFontSize: '0.95rem',
+  fontWeight: '800',
+  lineHeight: '1.2',
+  letterSpacing: '-0.02em',
+  textColor: '#ffffff',
+  btnPrimaryWidth: 'auto',
+  btnPrimaryHeight: 'auto',
+  btnSecondaryWidth: 'auto',
+  btnSecondaryHeight: 'auto',
+  btnBorderRadius: '12px',
+  btnPadding: '14px 28px',
+  btnBgColor: '#ff5a3c',
+  btnTextColor: '#ffffff',
+  btnHoverBgColor: '#e04f32',
+  btnHoverTextColor: '#ffffff',
+  animationEnabled: true,
+  animationType: 'fade',
+  animationDuration: '0.6s',
+  animationDelay: '0.1s',
+  fullWidth: true,
+  containerWidth: '1280px',
+  boxShadow: 'none',
+  blurEffect: '0px',
+  zIndex: '10',
+  overflowControl: 'hidden'
+};
 
 export interface CarouselSettings {
   autoPlay: boolean;
@@ -1003,6 +1171,37 @@ export interface AdminTheme {
     compactMode: boolean;
     comfortableMode: boolean;
     spaciousMode: boolean;
+  };
+}
+
+export interface BrandingSetting {
+  id: string;
+  companyName: string;
+  brandName?: string;
+  tagline: string;
+  logoUrl: string;
+  faviconUrl: string;
+  seoLogoUrl: string;
+  ogImageUrl: string;
+  bannerImageUrl?: string;
+  socialImageUrl?: string;
+  websiteUrl: string;
+  email: string;
+  phone: string;
+  updatedAt: string;
+  updatedBy: string;
+  useLogoAsSeoLogo?: boolean;
+  socialLinks?: {
+    facebook?: string;
+    instagram?: string;
+    linkedin?: string;
+    youtube?: string;
+    twitter?: string;
+  };
+  contactDetails?: {
+    email?: string;
+    phone?: string;
+    whatsapp?: string;
   };
 }
 

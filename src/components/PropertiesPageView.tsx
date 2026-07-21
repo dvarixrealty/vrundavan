@@ -18,6 +18,7 @@ interface PropertiesPageViewProps {
   onViewDetails: (property: Property) => void;
   onOpenCustomRequest: () => void;
   onOpenSiteVisit: () => void;
+  onOpenTalkToExpert: (property: Property | null) => void;
   setBookingTargetProperty: (property: Property | null) => void;
   searchCategories: SearchCategory[];
   siteSettings?: SiteCMSConfig;
@@ -31,6 +32,7 @@ export default function PropertiesPageView({
   onViewDetails,
   onOpenCustomRequest,
   onOpenSiteVisit,
+  onOpenTalkToExpert,
   setBookingTargetProperty,
   searchCategories = [],
   siteSettings,
@@ -1272,7 +1274,7 @@ export default function PropertiesPageView({
               </div>
               <button
                 type="button"
-                onClick={onOpenCustomRequest}
+                onClick={() => onOpenTalkToExpert(null)}
                 className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 border border-slate-805 text-slate-300 hover:text-white hover:border-[#ff5a3c] text-xs font-bold uppercase tracking-wider rounded-xl transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 Talk to Expert &rarr;

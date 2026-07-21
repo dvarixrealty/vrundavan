@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { mysqlClientService } from '../lib/mysqlClientService';
 import { 
   Calendar, Clock, User, Building2, Award, Plus, Search, CheckCircle2, 
   Trash2, X, AlertOctagon, RefreshCw, Star, Ban, CheckSquare, 
@@ -145,6 +146,8 @@ export default function SaaSSiteVisitsModule({
     };
 
     setSiteVisits(prev => [newVisitObj, ...prev]);
+    // Dual-write to MySQL parallel database
+    mysqlClientService.saveSiteVisit(newVisitObj);
     setShowCreateForm(false);
     setSelectedCustomerId('');
     setSelectedPropId('');
@@ -172,7 +175,7 @@ export default function SaaSSiteVisitsModule({
 
     const updated = siteVisits.map(v => {
       if (v.id === selectedVisit.id) {
-        return {
+        const payload = {
           ...v,
           status: visitStatus,
           feedback: feedbackNotes,
@@ -183,6 +186,9 @@ export default function SaaSSiteVisitsModule({
           customerReaction: customerReaction,
           images: attachedImages
         };
+        // Dual-write to MySQL parallel database
+        mysqlClientService.saveSiteVisit(payload);
+        return payload;
       }
       return v;
     });
@@ -203,12 +209,15 @@ export default function SaaSSiteVisitsModule({
 
     const updated = siteVisits.map(v => {
       if (v.id === selectedVisit.id) {
-        return {
+        const payload = {
           ...v,
           status: 'Cancelled',
           feedback: cancelNotes,
           cancelReason: cancelReasonState
         };
+        // Dual-write to MySQL parallel database
+        mysqlClientService.saveSiteVisit(payload);
+        return payload;
       }
       return v;
     });
@@ -252,7 +261,14 @@ export default function SaaSSiteVisitsModule({
 
   // Soft Delete Visit action (moves to trash)
   const handleSoftDelete = (visitId: string) => {
-    const updated = siteVisits.map(v => v.id === visitId ? { ...v, isSoftDeleted: true } : v);
+    const updated = siteVisits.map(v => {
+      if (v.id === visitId) {
+        const payload = { ...v, isSoftDeleted: true };
+        mysqlClientService.saveSiteVisit(payload);
+        return payload;
+      }
+      return v;
+    });
     setSiteVisits(updated);
     setSelectedVisit(null);
     setAlertSuccess("Site Visit moved to Soft Deleted Trash Bin.");
@@ -261,7 +277,14 @@ export default function SaaSSiteVisitsModule({
 
   // Restore Visit action
   const handleRestoreVisit = (visitId: string) => {
-    const updated = siteVisits.map(v => v.id === visitId ? { ...v, isSoftDeleted: false } : v);
+    const updated = siteVisits.map(v => {
+      if (v.id === visitId) {
+        const payload = { ...v, isSoftDeleted: false };
+        mysqlClientService.saveSiteVisit(payload);
+        return payload;
+      }
+      return v;
+    });
     setSiteVisits(updated);
     setAlertSuccess("Site Visit restored to active scheduler.");
     setTimeout(() => setAlertSuccess(''), 3000);
@@ -271,6 +294,7 @@ export default function SaaSSiteVisitsModule({
   const handlePermanentDelete = (visitId: string) => {
     if (confirm("Permanently erase this site walkthrough from databases? This operation is irreversible.")) {
       setSiteVisits(prev => prev.filter(v => v.id !== visitId));
+      mysqlClientService.deleteSiteVisit(visitId);
       setAlertSuccess("Site walkthrough permanently purged.");
       setTimeout(() => setAlertSuccess(''), 3000);
     }

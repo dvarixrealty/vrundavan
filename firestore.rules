@@ -88,6 +88,14 @@ service cloud.firestore {
              data.requestedServiceName is string && data.requestedServiceName.size() <= 200;
     }
 
+    function isValidConversation(data) {
+      return data.conversationId is string && data.conversationId.size() <= 128 &&
+             data.sessionId is string && data.sessionId.size() <= 128 &&
+             data.visitorId is string && data.visitorId.size() <= 128 &&
+             data.visitorName is string && data.visitorName.size() <= 200 &&
+             data.messages is list;
+    }
+
     // 4. Match Rules for Collections
     match /properties/{propertyId} {
       allow read: if true;
@@ -155,9 +163,45 @@ service cloud.firestore {
       allow create, update, delete: if isSignedIn() && isValidId(settingId);
     }
 
-    match /settings/{settingId} {
+    match /chat_conversations/{conversationId} {
+      allow create, update: if isValidId(conversationId) && isValidConversation(incoming());
+      allow get: if isValidId(conversationId);
+      allow list: if isSignedIn();
+      allow delete: if isAdmin() && isValidId(conversationId);
+    }
+
+    match /chatbot_documents/{docId} {
       allow read: if true;
+      allow create, update, delete: if isSignedIn() && isValidId(docId);
+    }
+
+    match /chatbot_websites/{webId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn() && isValidId(webId);
+    }
+
+    match /chatbot_snippets/{snippetId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn() && isValidId(snippetId);
+    }
+
+    match /chatbot_flows/{flowId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn() && isValidId(flowId);
+    }
+
+    match /chatbot_personality_versions/{versionId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn() && isValidId(versionId);
+    }
+
+    match /settings/{settingId} {
+      allow read: if settingId != 'seo_settings' || isAdmin();
       allow create, update, delete: if isAdmin() && isValidId(settingId);
+    }
+
+    match /seo_configs/{configId} {
+      allow read, write, delete: if isAdmin() && isValidId(configId);
     }
 
     match /campaign_services/{serviceId} {

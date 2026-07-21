@@ -4,12 +4,13 @@ import {
   ShieldCheck, CheckCircle, Search, LogOut, Lock, KeyRound, 
   MapPin, DollarSign, Compass, Layers, Check, CheckSquare, Users,
   Plus, Edit, BarChart2, Tag, TrendingUp, Coins, FileText, CheckCircle2,
-  ChevronRight, ArrowUpRight, Award, PlusCircle, Settings, Bell, HelpCircle, Palette, Grid, Eye, EyeOff, Inbox, User
+  ChevronRight, ArrowUpRight, Award, PlusCircle, Settings, Bell, HelpCircle, Palette, Grid, Eye, EyeOff, Inbox, User, Globe
 } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Inquiry, CustomRequirement, Property, Agent, MapLocation, AdminUser, PermissionSet, CRMLead, FAQ, MapSettings, SearchCategory, PropertyTypeCard, QuickFilter, SiteCMSConfig, HeroBanner, AdminTheme } from '../types';
 import { firebaseService, cleanPropertyPayload } from '../lib/firebaseService';
+import { mysqlClientService } from '../lib/mysqlClientService';
 import { auth } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
@@ -32,10 +33,14 @@ import SaaSEnquiryCenterModule from './SaaSEnquiryCenterModule';
 import SaaSMarketingModule from './SaaSMarketingModule';
 import SaaSAgentWorkspaceModule from './SaaSAgentWorkspaceModule';
 import SaaSThemeStudioModule from './SaaSThemeStudioModule';
+import SaaSSEOModule from './SaaSSEOModule';
+import SaaSBrandIdentityModule from './SaaSBrandIdentityModule';
+import Logo from './Logo';
 import HeroBannerManager from './cms/HeroBannerManager';
 import BlogManager from './cms/BlogManager';
 import CampaignManager from './cms/CampaignManager';
 import FreeServiceRequestsPanel from './cms/FreeServiceRequestsPanel';
+import MediaCenterModule from './MediaCenterModule';
 
 interface InquiryDashboardProps {
   inquiries: Inquiry[];
@@ -69,6 +74,8 @@ interface InquiryDashboardProps {
   siteSettings?: SiteCMSConfig;
   setSiteSettings?: (newSettings: SiteCMSConfig) => void;
   heroBanners?: HeroBanner[];
+  useFirebase?: boolean;
+  setUseFirebase?: (val: boolean) => void;
 }
 
 export default function InquiryDashboard({
@@ -102,7 +109,9 @@ export default function InquiryDashboard({
   setQuickFilters,
   siteSettings,
   setSiteSettings,
-  heroBanners = []
+  heroBanners = [],
+  useFirebase = false,
+  setUseFirebase
 }: InquiryDashboardProps) {
 
   // Collapsible sidebar state
@@ -237,6 +246,29 @@ export default function InquiryDashboard({
       (err) => console.error("Theme Studio subscription failed:", err)
     );
     return unsub;
+  }, []);
+
+  // Load Phase 7 Hostinger MySQL parallel datasets on mount
+  useEffect(() => {
+    async function loadMySQLParallelDatasets() {
+      try {
+        console.log("🔄 Loading Phase 7 datasets from Hostinger MySQL parallel database...");
+        const mysqlVisits = await mysqlClientService.getSiteVisits();
+        if (mysqlVisits && mysqlVisits.length > 0) {
+          console.log(`✅ Loaded ${mysqlVisits.length} Site Visits from MySQL.`);
+          setSiteVisits(mysqlVisits);
+        }
+        
+        const mysqlFinance = await mysqlClientService.getFinanceEntries();
+        if (mysqlFinance && mysqlFinance.length > 0) {
+          console.log(`✅ Loaded ${mysqlFinance.length} Finance Entries from MySQL.`);
+          setFinanceEntries(mysqlFinance);
+        }
+      } catch (err) {
+        console.warn("⚠️ Phase 7 MySQL parallel datasets failed to load (using local state):", err);
+      }
+    }
+    loadMySQLParallelDatasets();
   }, []);
 
   // Ctrl+B sidebar toggle keyboard shortcut listener
@@ -580,6 +612,8 @@ export default function InquiryDashboard({
     "FAQ Management": "WEBSITE CMS",
     "Marketing": "WEBSITE CMS",
     "Website CMS Customize": "WEBSITE CMS",
+    "Brand Identity": "WEBSITE CMS",
+    "SEO Center": "WEBSITE CMS",
 
     // AI & AUTOMATION
     "AI Center": "AI & AUTOMATION",
@@ -851,7 +885,7 @@ export default function InquiryDashboard({
   const superAdminEmail = 'dvarixrealty@gmail.com';
   const isSuperAdmin = loggedInUser?.email.trim().toLowerCase() === superAdminEmail;
   const currentRole = loggedInUser?.roleName || 'Agent';
-  const isSuperAdminUser = loggedInUser?.email.trim().toLowerCase() === superAdminEmail || currentRole === 'Super Admin' || currentRole === 'Admin';
+  const isSuperAdminUser = loggedInUser?.email.trim().toLowerCase() === superAdminEmail || currentRole === 'Super Admin' || currentRole === 'Admin' || currentRole === 'Super Administrator' || currentRole === 'Admin Head';
   const isManagerUser = currentRole === 'Manager' || currentRole === 'Sales Manager' || currentRole === 'Team Leader';
   const isAgentUser = currentRole === 'Agent' || currentRole === 'Sales Agent' || (!isSuperAdminUser && !isManagerUser);
   const userPermissions = loggedInUser?.permissions || {
@@ -1757,6 +1791,8 @@ AI STRATEGY PROPOSAL:
 
   // Nav categories meta elements mapping based on logged in user's role
   const MenuItems = useMemo(() => {
+    const isAdminHead = currentRole === 'Admin Head' || loggedInUser?.email.trim().toLowerCase() === superAdminEmail;
+
     if (isSuperAdminUser) {
       return [
         { key: "Dashboard", icon: BarChart2 },
@@ -1785,6 +1821,9 @@ AI STRATEGY PROPOSAL:
         { key: "Role & Permissions", icon: ShieldCheck },
         { key: "Theme Studio", icon: Palette },
         { key: "Website CMS Customize", icon: Palette },
+        { key: "Media Center", icon: LucideIcons.Image },
+        ...(isAdminHead ? [{ key: "Brand Identity", icon: Award }] : []),
+        { key: "SEO Center", icon: Globe },
         { key: "System Configuration", icon: Settings }
       ] as const;
     }
@@ -1803,9 +1842,11 @@ AI STRATEGY PROPOSAL:
         { key: "Agents & Team", icon: ShieldCheck },
         { key: "Tasks & Operations", icon: CheckSquare },
         { key: "Documents", icon: FileText },
+        ...(isAdminHead ? [{ key: "Brand Identity", icon: Award }] : []),
         { key: "Reports & Analytics", icon: Coins },
         { key: "Notifications Center", icon: Bell },
-        { key: "Theme Studio", icon: Palette }
+        { key: "Theme Studio", icon: Palette },
+        { key: "Media Center", icon: LucideIcons.Image }
       ] as const;
     }
 
@@ -1818,11 +1859,12 @@ AI STRATEGY PROPOSAL:
       { key: "My Follow-ups", icon: Clock },
       { key: "Site Visits", icon: Calendar },
       { key: "Calendar", icon: Calendar },
+      ...(isAdminHead ? [{ key: "Brand Identity", icon: Award }] : []),
       { key: "Documents", icon: FileText },
       { key: "Notifications", icon: Bell },
       { key: "My Profile", icon: User }
     ] as const;
-  }, [isSuperAdminUser, isManagerUser, isAgentUser]);
+  }, [isSuperAdminUser, isManagerUser, isAgentUser, currentRole, loggedInUser, superAdminEmail]);
 
   // Enforce route protection & authorization
   const isAuthorized = useMemo(() => {
@@ -1901,15 +1943,18 @@ AI STRATEGY PROPOSAL:
       },
       {
         key: "WEBSITE CMS",
-        label: "Website CMS",
+        label: "Website Management",
         iconName: "MonitorSmartphone",
         isExpandable: true,
         children: [
           { key: "Hero Banner Management", label: "Hero Banner Management", iconName: "Image" },
+          { key: "Media Center", label: "Media Center", iconName: "Image" },
           { key: "Homepage CMS", label: "Homepage CMS", iconName: "Home" },
           { key: "FAQ Management", label: "FAQ Management", iconName: "HelpCircle" },
           { key: "Marketing", label: "Marketing", iconName: "TrendingUp" },
-          { key: "Website CMS Customize", label: "Website CMS Customize", iconName: "Palette" }
+          { key: "Website CMS Customize", label: "Website CMS Customize", iconName: "Palette" },
+          { key: "Brand Identity", label: "Brand Identity", iconName: "Award" },
+          { key: "SEO Center", label: "SEO Center", iconName: "Globe" }
         ]
       },
       {
@@ -2031,17 +2076,17 @@ AI STRATEGY PROPOSAL:
   // Render Login state if needed
   if (!isAuthenticated) {
     return (
-      <section className="bg-slate-50 min-h-screen py-24 px-4 flex items-center justify-center font-sans" id="saas-login-portal">
-        <div className="max-w-md w-full bg-white border border-slate-200 p-8 rounded-2xl shadow-xl space-y-6 text-left relative overflow-hidden">
+      <section className="bg-slate-950 min-h-screen py-24 px-4 flex items-center justify-center font-sans" id="saas-login-portal">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl space-y-6 text-left relative overflow-hidden">
           
-          <div className="absolute top-0 inset-x-0 h-1.5 bg-blue-600" />
+          <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-[#C89B3C] to-amber-500" />
           
-          <div className="text-center space-y-2">
-            <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl w-fit mx-auto text-blue-600">
-              <Lock className="h-6 w-6" />
+          <div className="text-center space-y-4">
+            <div className="p-3 bg-slate-950 border border-slate-800 rounded-2xl w-fit mx-auto">
+              <Logo size="md" />
             </div>
-            <h2 className="text-xl font-bold font-sans text-slate-900 tracking-tight">Dvarix Realty ERP Workspace</h2>
-            <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+            <h2 className="text-lg font-bold font-sans text-slate-100 tracking-tight">ERP Control Workspace</h2>
+            <p className="text-[11px] text-slate-400 max-w-xs mx-auto leading-relaxed">
               Log secure credentials below to manage custom requirement maps, site coordinates, and property ledgers.
             </p>
           </div>
@@ -2054,8 +2099,8 @@ AI STRATEGY PROPOSAL:
                 required
                 placeholder="dvarixrealty@gmail.com"
                 value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 text-xs rounded-xl px-4 py-3 focus:outline-none transition font-sans"
+                onChange={(setEmailInput ? (e => setEmailInput(e.target.value)) : undefined)}
+                className="w-full bg-[#161920] border border-slate-800 focus:border-amber-500 text-slate-200 text-xs rounded-xl px-4 py-3 focus:outline-none transition font-sans font-semibold"
               />
             </div>
 
@@ -2066,13 +2111,13 @@ AI STRATEGY PROPOSAL:
                 required
                 placeholder="••••••••••••"
                 value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 text-xs rounded-xl px-4 py-3 focus:outline-none transition font-sans"
+                onChange={(setPasswordInput ? (e => setPasswordInput(e.target.value)) : undefined)}
+                className="w-full bg-[#161920] border border-slate-800 focus:border-amber-500 text-slate-200 text-xs rounded-xl px-4 py-3 focus:outline-none transition font-sans font-semibold"
               />
             </div>
 
             {loginError && (
-              <div className="p-3 bg-red-50 border border-red-200 text-red-650 text-xs rounded-lg font-mono">
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-lg font-mono">
                 ⚠️ {loginError}
               </div>
             )}
@@ -2080,13 +2125,15 @@ AI STRATEGY PROPOSAL:
             <button
               type="submit"
               disabled={isAuthenticating}
-              className={`w-full py-3 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition shadow-md cursor-pointer flex items-center justify-center space-x-2 ${
-                isAuthenticating ? 'bg-blue-450 opacity-80 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+              className={`w-full py-3 text-slate-950 font-bold text-xs uppercase tracking-wider rounded-xl transition shadow-lg cursor-pointer flex items-center justify-center space-x-2 ${
+                isAuthenticating 
+                  ? 'bg-amber-600/50 opacity-80 cursor-not-allowed' 
+                  : 'bg-gradient-to-r from-[#C89B3C] to-amber-500 hover:from-amber-500 hover:to-amber-600 shadow-amber-500/5'
               }`}
             >
               {isAuthenticating ? (
                 <>
-                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-slate-950"></div>
                   <span>Authenticating Node...</span>
                 </>
               ) : (
@@ -2095,7 +2142,7 @@ AI STRATEGY PROPOSAL:
             </button>
           </form>
 
-          <div className="pt-4 border-t border-slate-100 text-center text-[10px] font-mono text-slate-400">
+          <div className="pt-4 border-t border-slate-800 text-center text-[10px] font-mono text-slate-500">
             Secure Node Security Enforced • TLS-1.3 Encrypted
           </div>
         </div>
@@ -3214,6 +3261,34 @@ AI STRATEGY PROPOSAL:
                 />
               )}
 
+              {/* PANEL NEW: ENTERPRISE SEO CENTER */}
+              {activeParent === 'SEO Center' && (
+                <SaaSSEOModule
+                  properties={properties}
+                  loggedInUser={{
+                    email: loggedInUser?.email || 'dvarixrealty@gmail.com',
+                    role: isSuperAdminUser ? 'Admin Head' : loggedInUser?.roleName === 'Manager' ? 'Manager' : 'Sales Agent'
+                  }}
+                  onBackToDashboard={() => setActiveParent('Dashboard')}
+                />
+              )}
+
+              {/* PANEL NEW: ENTERPRISE MEDIA CENTER */}
+              {activeParent === 'Media Center' && (
+                <MediaCenterModule />
+              )}
+
+              {/* PANEL NEW: WEBSITE BRAND IDENTITY */}
+              {activeParent === 'Brand Identity' && (
+                <SaaSBrandIdentityModule
+                  loggedInUser={{
+                    email: loggedInUser?.email || 'dvarixrealty@gmail.com',
+                    role: isSuperAdminUser ? 'Admin Head' : loggedInUser?.roleName === 'Manager' ? 'Manager' : 'Sales Agent'
+                  }}
+                  onBackToDashboard={() => setActiveParent('Dashboard')}
+                />
+              )}
+
               {/* PANEL NEW: FAQ MANAGEMENT */}
               {activeParent === 'FAQ Management' && (
                 <SaaSFAQModule
@@ -3281,7 +3356,55 @@ AI STRATEGY PROPOSAL:
                 <div className="space-y-6 text-left text-xs animate-in fade-in duration-200">
                   <div className="border-b border-slate-100 pb-2">
                     <h2 className="text-xl font-bold font-sans text-slate-900 tracking-tight">System Configuration Settings</h2>
-                    <p className="text-xs text-slate-500">Tune CRM settings metrics, billing tax percent, and custom field values</p>
+                    <p className="text-xs text-slate-500">Tune CRM settings metrics, billing tax percent, database configurations, and custom field values</p>
+                  </div>
+
+                  {/* Database Primary & Emergency Rollback Control Panel */}
+                  <div className="bg-white border-2 border-amber-200 p-6 rounded-2xl shadow-xs space-y-4 max-w-lg mx-auto">
+                    <div className="flex items-center space-x-2">
+                      <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></div>
+                      <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Database Configuration & Rollback</h3>
+                    </div>
+                    <p className="text-slate-500 leading-relaxed text-[11px]">
+                      The application is powered by the high-performance <strong>Hostinger MySQL</strong> relational database. In the event of network disruption or server maintenance, you can toggle instant <strong>Firebase Firestore Rollback Mode</strong> to ensure uninterrupted operations.
+                    </p>
+
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Backend Engine</span>
+                        <span className={`text-xs font-bold font-mono ${useFirebase ? 'text-amber-600' : 'text-emerald-600'}`}>
+                          {useFirebase ? '⚠️ FIREBASE FIRESTORE (ROLLBACK ACTIVE)' : '⚡ HOSTINGER MySQL (PRIMARY)'}
+                        </span>
+                      </div>
+                      <div className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider font-mono bg-white border">
+                        {useFirebase ? 'Standby Mode' : 'Operational'}
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (setUseFirebase) {
+                            const nextVal = !useFirebase;
+                            setUseFirebase(nextVal);
+                            showToast(
+                              nextVal 
+                                ? "Emergency Rollback activated! Routed traffic to Firebase." 
+                                : "MySQL Backend restored! Connected to primary Hostinger DB.", 
+                              "success"
+                            );
+                          }
+                        }}
+                        className={`w-full py-2.5 px-4 font-bold rounded-lg transition-all duration-300 shadow-xs flex items-center justify-center space-x-2 cursor-pointer ${
+                          useFirebase 
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                            : 'bg-amber-500 hover:bg-amber-600 text-white'
+                        }`}
+                      >
+                        <span>{useFirebase ? '⚡ Restore Hostinger MySQL Primary' : '⚠️ Activate Emergency Firebase Rollback'}</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4 max-w-lg mx-auto">
@@ -3675,6 +3798,7 @@ AI STRATEGY PROPOSAL:
                       properties={properties}
                       categories={categories}
                       heroBanners={heroBanners}
+                      useFirebase={useFirebase}
                     />
                   )}
 
@@ -4609,78 +4733,309 @@ AI STRATEGY PROPOSAL:
                       <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs space-y-4">
                         <h4 className="font-bold text-slate-800 text-xs border-b border-slate-100 pb-2 uppercase tracking-wide">3. Footer Column Link Directories</h4>
                         
-                        <div className="space-y-5">
+                        <div className="space-y-6">
                           {/* Company links */}
-                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3 text-left">
-                            <span className="text-[10px] font-mono text-[#FF6B3D] font-bold block uppercase tracking-wider">Company Column Directory Links</span>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {footerCompanyLinks.map((link, idx) => (
-                                <div key={idx} className="flex gap-2 bg-white p-2 border border-slate-100 rounded-lg">
-                                  <input
-                                    type="text"
-                                    value={link.label}
-                                    placeholder="Label"
-                                    onChange={(e) => {
-                                      const updated = [...footerCompanyLinks];
-                                      updated[idx] = { ...updated[idx], label: e.target.value };
-                                      setFooterCompanyLinks(updated);
-                                    }}
-                                    className="w-1/2 border border-slate-200 px-2 py-1 text-xs font-bold rounded text-slate-800"
-                                  />
-                                  <select
-                                    value={link.url}
-                                    onChange={(e) => {
-                                      const updated = [...footerCompanyLinks];
-                                      updated[idx] = { ...updated[idx], url: e.target.value };
-                                      setFooterCompanyLinks(updated);
-                                    }}
-                                    className="w-1/2 border border-slate-200 px-2 py-1 text-xs rounded text-slate-800"
-                                  >
-                                    <option value="Home">Home Screen</option>
-                                    <option value="Properties">Properties Screen</option>
-                                    <option value="About">About Screen</option>
-                                    <option value="Contact">Contact Screen</option>
-                                    <option value="CustomRequest">Custom Property Request</option>
-                                  </select>
-                                </div>
-                              ))}
+                          <div className="p-5 bg-slate-50 rounded-2xl border border-slate-150 space-y-3 text-left">
+                            <div className="flex justify-between items-center pb-1">
+                              <span className="text-[11px] font-mono text-[#FF6B3D] font-bold uppercase tracking-wider">Company Column Directory Links</span>
+                              <button
+                                onClick={() => {
+                                  const updated = [...footerCompanyLinks, { label: 'New Page', url: '/new-page' }];
+                                  setFooterCompanyLinks(updated);
+                                }}
+                                className="px-3 py-1 bg-white hover:bg-slate-100 text-[#FF6B3D] hover:text-[#e0562d] font-bold rounded-lg border border-slate-200 text-[10px] uppercase tracking-wide transition-all cursor-pointer"
+                              >
+                                + Add Company Link
+                              </button>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              {footerCompanyLinks.length === 0 ? (
+                                <p className="text-xs text-slate-400 italic text-center py-4">No custom links. Default fallback links will render.</p>
+                              ) : (
+                                footerCompanyLinks.map((link, idx) => (
+                                  <div key={idx} className="flex flex-col md:flex-row gap-2 bg-white p-3 border border-slate-200 rounded-xl items-center">
+                                    {/* Reorder actions */}
+                                    <div className="flex gap-1 shrink-0">
+                                      <button
+                                        disabled={idx === 0}
+                                        onClick={() => {
+                                          const updated = [...footerCompanyLinks];
+                                          const temp = updated[idx];
+                                          updated[idx] = updated[idx - 1];
+                                          updated[idx - 1] = temp;
+                                          setFooterCompanyLinks(updated);
+                                        }}
+                                        className="p-1 px-2 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-30 text-[10px] border border-slate-150 cursor-pointer text-slate-600"
+                                      >
+                                        ▲
+                                      </button>
+                                      <button
+                                        disabled={idx === footerCompanyLinks.length - 1}
+                                        onClick={() => {
+                                          const updated = [...footerCompanyLinks];
+                                          const temp = updated[idx];
+                                          updated[idx] = updated[idx + 1];
+                                          updated[idx + 1] = temp;
+                                          setFooterCompanyLinks(updated);
+                                        }}
+                                        className="p-1 px-2 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-30 text-[10px] border border-slate-150 cursor-pointer text-slate-600"
+                                      >
+                                        ▼
+                                      </button>
+                                    </div>
+
+                                    {/* Link label */}
+                                    <div className="flex-1 min-w-[120px] w-full">
+                                      <input
+                                        type="text"
+                                        value={link.label}
+                                        placeholder="Link Name"
+                                        onChange={(e) => {
+                                          const updated = [...footerCompanyLinks];
+                                          updated[idx] = { ...updated[idx], label: e.target.value };
+                                          setFooterCompanyLinks(updated);
+                                        }}
+                                        className="w-full border border-slate-200 px-3 py-1.5 text-xs font-bold rounded-lg text-slate-850 bg-white"
+                                      />
+                                    </div>
+
+                                    {/* Link URL / Action key */}
+                                    <div className="flex-2 min-w-[160px] w-full">
+                                      <input
+                                        type="text"
+                                        value={link.url}
+                                        placeholder="Route or Custom Action Key (e.g., /about, /properties)"
+                                        onChange={(e) => {
+                                          const updated = [...footerCompanyLinks];
+                                          updated[idx] = { ...updated[idx], url: e.target.value };
+                                          setFooterCompanyLinks(updated);
+                                        }}
+                                        className="w-full border border-slate-200 px-3 py-1.5 text-xs rounded-lg text-slate-700 bg-white font-mono"
+                                      />
+                                    </div>
+
+                                    {/* Delete Action */}
+                                    <button
+                                      onClick={() => {
+                                        const updated = footerCompanyLinks.filter((_, i) => i !== idx);
+                                        setFooterCompanyLinks(updated);
+                                      }}
+                                      className="p-1.5 px-3 bg-red-50 hover:bg-red-100 border border-red-150 text-red-600 rounded-lg text-[10px] uppercase font-extrabold cursor-pointer transition-all"
+                                    >
+                                      ✕ Delete
+                                    </button>
+                                  </div>
+                                ))
+                              )}
                             </div>
                           </div>
 
                           {/* Services links */}
-                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3 text-left">
-                            <span className="text-[10px] font-mono text-[#FF6B3D] font-bold block uppercase tracking-wider">Services Column Directory Links</span>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {footerServicesLinks.map((link, idx) => (
-                                <div key={idx} className="flex gap-2 bg-white p-2 border border-slate-100 rounded-lg">
-                                  <input
-                                    type="text"
-                                    value={link.label}
-                                    placeholder="Label"
-                                    onChange={(e) => {
-                                      const updated = [...footerServicesLinks];
-                                      updated[idx] = { ...updated[idx], label: e.target.value };
-                                      setFooterServicesLinks(updated);
-                                    }}
-                                    className="w-1/2 border border-slate-200 px-2 py-1 text-xs font-bold rounded text-slate-800"
-                                  />
-                                  <input
-                                    type="text"
-                                    value={link.url}
-                                    placeholder="URL or Tab Key"
-                                    onChange={(e) => {
-                                      const updated = [...footerServicesLinks];
-                                      updated[idx] = { ...updated[idx], url: e.target.value };
-                                      setFooterServicesLinks(updated);
-                                    }}
-                                    className="w-1/2 border border-slate-200 px-2 py-1 text-xs rounded text-slate-800"
-                                  />
-                                </div>
-                              ))}
+                          <div className="p-5 bg-slate-50 rounded-2xl border border-slate-150 space-y-3 text-left">
+                            <div className="flex justify-between items-center pb-1">
+                              <span className="text-[11px] font-mono text-[#FF6B3D] font-bold uppercase tracking-wider">Services Column Directory Links</span>
+                              <button
+                                onClick={() => {
+                                  const updated = [...footerServicesLinks, { label: 'New Service', url: '/properties', filter: '' }];
+                                  setFooterServicesLinks(updated);
+                                }}
+                                className="px-3 py-1 bg-white hover:bg-slate-100 text-[#FF6B3D] hover:text-[#e0562d] font-bold rounded-lg border border-slate-200 text-[10px] uppercase tracking-wide transition-all cursor-pointer"
+                              >
+                                + Add Services Link
+                              </button>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              {footerServicesLinks.length === 0 ? (
+                                <p className="text-xs text-slate-400 italic text-center py-4">No custom links. Default fallback links will render.</p>
+                              ) : (
+                                footerServicesLinks.map((link, idx) => (
+                                  <div key={idx} className="flex flex-col md:flex-row gap-2 bg-white p-3 border border-slate-200 rounded-xl items-center">
+                                    {/* Reorder actions */}
+                                    <div className="flex gap-1 shrink-0">
+                                      <button
+                                        disabled={idx === 0}
+                                        onClick={() => {
+                                          const updated = [...footerServicesLinks];
+                                          const temp = updated[idx];
+                                          updated[idx] = updated[idx - 1];
+                                          updated[idx - 1] = temp;
+                                          setFooterServicesLinks(updated);
+                                        }}
+                                        className="p-1 px-2 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-30 text-[10px] border border-slate-150 cursor-pointer text-slate-600"
+                                      >
+                                        ▲
+                                      </button>
+                                      <button
+                                        disabled={idx === footerServicesLinks.length - 1}
+                                        onClick={() => {
+                                          const updated = [...footerServicesLinks];
+                                          const temp = updated[idx];
+                                          updated[idx] = updated[idx + 1];
+                                          updated[idx + 1] = temp;
+                                          setFooterServicesLinks(updated);
+                                        }}
+                                        className="p-1 px-2 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-30 text-[10px] border border-slate-150 cursor-pointer text-slate-600"
+                                      >
+                                        ▼
+                                      </button>
+                                    </div>
+
+                                    {/* Link label */}
+                                    <div className="flex-1 min-w-[120px] w-full">
+                                      <input
+                                        type="text"
+                                        value={link.label}
+                                        placeholder="Link Name"
+                                        onChange={(e) => {
+                                          const updated = [...footerServicesLinks];
+                                          updated[idx] = { ...updated[idx], label: e.target.value };
+                                          setFooterServicesLinks(updated);
+                                        }}
+                                        className="w-full border border-slate-200 px-3 py-1.5 text-xs font-bold rounded-lg text-slate-850 bg-white"
+                                      />
+                                    </div>
+
+                                    {/* Link URL / Action key */}
+                                    <div className="flex-1 min-w-[140px] w-full">
+                                      <input
+                                        type="text"
+                                        value={link.url}
+                                        placeholder="Route or Preset Key"
+                                        onChange={(e) => {
+                                          const updated = [...footerServicesLinks];
+                                          updated[idx] = { ...updated[idx], url: e.target.value };
+                                          setFooterServicesLinks(updated);
+                                        }}
+                                        className="w-full border border-slate-200 px-3 py-1.5 text-xs rounded-lg text-slate-700 bg-white font-mono"
+                                      />
+                                    </div>
+
+                                    {/* Service Category search filter (plots, residential, commercial etc) */}
+                                    <div className="flex-1 min-w-[120px] w-full">
+                                      <input
+                                        type="text"
+                                        value={link.filter || ''}
+                                        placeholder="Search Filter (Optional)"
+                                        onChange={(e) => {
+                                          const updated = [...footerServicesLinks];
+                                          updated[idx] = { ...updated[idx], filter: e.target.value };
+                                          setFooterServicesLinks(updated);
+                                        }}
+                                        className="w-full border border-slate-200 px-3 py-1.5 text-xs rounded-lg text-slate-700 bg-white font-mono"
+                                      />
+                                    </div>
+
+                                    {/* Delete Action */}
+                                    <button
+                                      onClick={() => {
+                                        const updated = footerServicesLinks.filter((_, i) => i !== idx);
+                                        setFooterServicesLinks(updated);
+                                      }}
+                                      className="p-1.5 px-3 bg-red-50 hover:bg-red-100 border border-red-150 text-red-600 rounded-lg text-[10px] uppercase font-extrabold cursor-pointer transition-all"
+                                    >
+                                      ✕ Delete
+                                    </button>
+                                  </div>
+                                ))
+                              )}
                             </div>
                           </div>
 
+                          {/* Quick / Legal links */}
+                          <div className="p-5 bg-slate-50 rounded-2xl border border-slate-150 space-y-3 text-left">
+                            <div className="flex justify-between items-center pb-1">
+                              <span className="text-[11px] font-mono text-[#FF6B3D] font-bold uppercase tracking-wider">Quick / Legal Links Column Directory</span>
+                              <button
+                                onClick={() => {
+                                  const updated = [...footerQuickLinks, { label: 'New Legal Policy', url: '/new-policy' }];
+                                  setFooterQuickLinks(updated);
+                                }}
+                                className="px-3 py-1 bg-white hover:bg-slate-100 text-[#FF6B3D] hover:text-[#e0562d] font-bold rounded-lg border border-slate-200 text-[10px] uppercase tracking-wide transition-all cursor-pointer"
+                              >
+                                + Add Quick Link
+                              </button>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              {footerQuickLinks.length === 0 ? (
+                                <p className="text-xs text-slate-400 italic text-center py-4">No custom links. Default fallback links will render.</p>
+                              ) : (
+                                footerQuickLinks.map((link, idx) => (
+                                  <div key={idx} className="flex flex-col md:flex-row gap-2 bg-white p-3 border border-slate-200 rounded-xl items-center">
+                                    {/* Reorder actions */}
+                                    <div className="flex gap-1 shrink-0">
+                                      <button
+                                        disabled={idx === 0}
+                                        onClick={() => {
+                                          const updated = [...footerQuickLinks];
+                                          const temp = updated[idx];
+                                          updated[idx] = updated[idx - 1];
+                                          updated[idx - 1] = temp;
+                                          setFooterQuickLinks(updated);
+                                        }}
+                                        className="p-1 px-2 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-30 text-[10px] border border-slate-150 cursor-pointer text-slate-600"
+                                      >
+                                        ▲
+                                      </button>
+                                      <button
+                                        disabled={idx === footerQuickLinks.length - 1}
+                                        onClick={() => {
+                                          const updated = [...footerQuickLinks];
+                                          const temp = updated[idx];
+                                          updated[idx] = updated[idx + 1];
+                                          updated[idx + 1] = temp;
+                                          setFooterQuickLinks(updated);
+                                        }}
+                                        className="p-1 px-2 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-30 text-[10px] border border-slate-150 cursor-pointer text-slate-600"
+                                      >
+                                        ▼
+                                      </button>
+                                    </div>
 
+                                    {/* Link label */}
+                                    <div className="flex-1 min-w-[120px] w-full">
+                                      <input
+                                        type="text"
+                                        value={link.label}
+                                        placeholder="Link Name"
+                                        onChange={(e) => {
+                                          const updated = [...footerQuickLinks];
+                                          updated[idx] = { ...updated[idx], label: e.target.value };
+                                          setFooterQuickLinks(updated);
+                                        }}
+                                        className="w-full border border-slate-200 px-3 py-1.5 text-xs font-bold rounded-lg text-slate-850 bg-white"
+                                      />
+                                    </div>
+
+                                    {/* Link URL / Action key */}
+                                    <div className="flex-2 min-w-[160px] w-full">
+                                      <input
+                                        type="text"
+                                        value={link.url}
+                                        placeholder="Route or Custom Action Key (e.g., /privacy-policy, /terms-conditions)"
+                                        onChange={(e) => {
+                                          const updated = [...footerQuickLinks];
+                                          updated[idx] = { ...updated[idx], url: e.target.value };
+                                          setFooterQuickLinks(updated);
+                                        }}
+                                        className="w-full border border-slate-200 px-3 py-1.5 text-xs rounded-lg text-slate-700 bg-white font-mono"
+                                      />
+                                    </div>
+
+                                    {/* Delete Action */}
+                                    <button
+                                      onClick={() => {
+                                        const updated = footerQuickLinks.filter((_, i) => i !== idx);
+                                        setFooterQuickLinks(updated);
+                                      }}
+                                      className="p-1.5 px-3 bg-red-50 hover:bg-red-100 border border-red-150 text-red-600 rounded-lg text-[10px] uppercase font-extrabold cursor-pointer transition-all"
+                                    >
+                                      ✕ Delete
+                                    </button>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
 

@@ -1,16 +1,20 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Building2, Plus, Search, MapPin, DollarSign, Layers, CheckSquare, 
+  Building2, Plus, Search, MapPin, DollarSign, Layers, CheckSquare, Image, 
   Trash2, Edit, Check, ShieldCheck, FileText, ChevronRight, ListCollapse,
   BadgePercent, Eye, Compass, Coins, Users, Share2, Printer, RefreshCw, 
   Archive, FileCode, CheckCircle2, X, XCircle, Play, History, Calendar, PlusCircle, ArrowLeftRight,
-  Sparkles, ToggleLeft, Settings, Database, Activity, AlertTriangle, Download, Trash, CheckSquare as CheckSquareIcon
+  Sparkles, ToggleLeft, Settings, Database, Activity, AlertTriangle, Download, Trash, CheckSquare as CheckSquareIcon,
+  Sliders, TrendingUp, MessageSquare, HelpCircle, Palette, Lock, Info, ExternalLink, Globe, Video, UserCheck, Layout, Heart
 } from 'lucide-react';
 import { Property, CustomRequirement, Agent, PropertyCardConfig, PropertyCardTemplate } from '../types';
 import PropertyCard, { formatCurrencyIndia } from './PropertyCard';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage, auth } from '../firebase';
 import { firebaseService } from '../lib/firebaseService';
+import MediaPicker from './MediaPicker';
+import MediaPickerModal, { MediaItem } from './MediaPickerModal';
+import EnterprisePMSWorkspace from './EnterprisePMSWorkspace';
 
 interface SaaSPropertiesModuleProps {
   properties: Property[];
@@ -250,6 +254,7 @@ export default function SaaSPropertiesModule({
   const [dragActiveGallery, setDragActiveGallery] = useState<boolean>(false);
   const [imageError, setImageError] = useState<string | null>(null);
   const [imageSuccess, setImageSuccess] = useState<string | null>(null);
+  const [imageWarning, setImageWarning] = useState<string | null>(null);
 
   const [uploadedCoverUrl, setUploadedCoverUrl] = useState<string>('');
   const [manualCoverUrl, setManualCoverUrl] = useState<string>('');
@@ -461,8 +466,37 @@ export default function SaaSPropertiesModule({
   const handleCoverUpload = async (file: File) => {
     setImageError(null);
     setImageSuccess(null);
+    setImageWarning(null);
     setCoverUploading(true);
     setCoverProgress(0);
+
+    // Dynamic warning validations
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const aspect = img.width / img.height;
+        const targetAspect = 3 / 2; // 1.5
+        const deviatesAspect = Math.abs(aspect - targetAspect) > 0.15;
+        const isTooSmall = img.width < 1000 || img.height < 666;
+
+        let warning = '';
+        if (deviatesAspect) {
+          warning += `⚠️ Cover image aspect ratio (${aspect.toFixed(2)}) deviates from recommended 3:2. Image might crop strangely. `;
+        }
+        if (isTooSmall) {
+          warning += `⚠️ Small cover image (${img.width}x${img.height}px, Recommended: 1200x800). `;
+        }
+        if (file.size > 2 * 1024 * 1024) {
+          warning += `⚠️ Large cover file (${(file.size / 1024 / 1024).toFixed(1)}MB). Consider compressing under 1MB. `;
+        }
+        if (warning) {
+          setImageWarning(warning);
+        }
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
 
     try {
       const downloadUrl = await uploadImageFile(file, 'cover', (progress) => {
@@ -487,6 +521,7 @@ export default function SaaSPropertiesModule({
   const handleGalleryUpload = async (files: FileList | File[]) => {
     setImageError(null);
     setImageSuccess(null);
+    setImageWarning(null);
 
     const fileList = Array.from(files);
     
@@ -495,6 +530,37 @@ export default function SaaSPropertiesModule({
     if (currentCount + fileList.length > 25) {
       setImageError('Maximum 25 images allowed in the gallery.');
       return;
+    }
+
+    // Dynamic warning validations on first selected file
+    if (fileList[0]) {
+      const file = fileList[0];
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const aspect = img.width / img.height;
+          const targetAspect = 4 / 3; // 1.33
+          const deviatesAspect = Math.abs(aspect - targetAspect) > 0.15;
+          const isTooSmall = img.width < 1200 || img.height < 900;
+
+          let warning = '';
+          if (deviatesAspect) {
+            warning += `⚠️ Gallery image aspect ratio (${aspect.toFixed(2)}) deviates from recommended 4:3 landscape. `;
+          }
+          if (isTooSmall) {
+            warning += `⚠️ Small gallery image (${img.width}x${img.height}px, Recommended: 1600x1200). `;
+          }
+          if (file.size > 2 * 1024 * 1024) {
+            warning += `⚠️ Large file size (${(file.size / 1024 / 1024).toFixed(1)}MB). Recommend compressing under 1MB. `;
+          }
+          if (warning) {
+            setImageWarning(warning);
+          }
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
     }
 
     // Prepare uploads in state to show progress
@@ -625,6 +691,123 @@ export default function SaaSPropertiesModule({
   const [formAgent, setFormAgent] = useState({
     assignedAgentId: '', agentContact: '', ownerName: '', ownerContact: ''
   });
+
+  // --- ENTERPRISE WORKSPACE STATE VARIABLES ---
+  const [activeEditTab, setActiveEditTab] = useState<string>('Basic Information');
+  const [formSlug, setFormSlug] = useState<string>('');
+  const [formLongDescription, setFormLongDescription] = useState<string>('');
+  const [formVisibility, setFormVisibility] = useState<string>('Public');
+  const [formVisibilityPassword, setFormVisibilityPassword] = useState<string>('');
+  
+  // Media Gallery (Broader assets)
+  const [formDroneImages, setFormDroneImages] = useState<string>('');
+  const [formVideos, setFormVideos] = useState<string>('');
+  const [formTours360, setFormTours360] = useState<string>('');
+  const [formLayoutPlans, setFormLayoutPlans] = useState<string>('');
+
+  // Specifications
+  const [formSpecsList, setFormSpecsList] = useState<Array<{ key: string; value: string }>>([]);
+
+  // Nearby places
+  const [formNearbyPlaces, setFormNearbyPlaces] = useState<Array<{ id: string; type: string; name: string; distance: string; duration: string }>>([]);
+
+  // Floor plans
+  const [formFloorPlans, setFormFloorPlans] = useState<Array<{ id: string; name: string; size: string; dimensions: string; beds: string; baths: string; image: string }>>([]);
+
+  // Legal
+  const [formLegal, setFormLegal] = useState({
+    reraId: '',
+    dcConversion: 'Not Applicable',
+    eKhata: 'None',
+    bankApproval: '',
+    clearTitle: 'Yes',
+    legalNotes: ''
+  });
+
+  // Pricing Extra
+  const [formPricingExtra, setFormPricingExtra] = useState({
+    registrationCharges: '',
+    maintenance: '',
+    bookingAmount: '',
+    emiEstimated: '',
+    emiTenure: '',
+    emiRate: '',
+    emiBankPartners: ''
+  });
+
+  // Investment Extra
+  const [formInvestmentExtra, setFormInvestmentExtra] = useState({
+    futureDevelopments: '',
+    investmentNotes: ''
+  });
+
+  // Documents
+  const [formDocuments, setFormDocuments] = useState<Array<{ id: string; name: string; url: string; size: string; type: string }>>([]);
+
+  // Videos Extra
+  const [formVideosExtra, setFormVideosExtra] = useState({
+    siteVideos: '',
+    droneVideos: '',
+    virtualTourUrl: '',
+    tour360Url: ''
+  });
+
+  // Agent Extra
+  const [formAgentExtra, setFormAgentExtra] = useState({
+    whatsapp: '',
+    email: ''
+  });
+
+  // Reviews
+  const [formReviews, setFormReviews] = useState<Array<{ id: string; authorName: string; authorRole: string; rating: number; content: string; status: 'Featured' | 'Visible' | 'Hidden'; avatar: string }>>([]);
+
+  // FAQs
+  const [formFaqs, setFormFaqs] = useState<Array<{ id: string; question: string; answer: string; displayOrder: number; status: 'Active' | 'Draft' }>>([]);
+
+  // SEO
+  const [formSeo, setFormSeo] = useState({
+    metaTitle: '',
+    metaDescription: '',
+    keywords: '',
+    canonicalUrl: '',
+    ogImage: ''
+  });
+
+  // Appearance & Branding
+  const [formAppearance, setFormAppearance] = useState({
+    primaryColor: '#ff5a3c',
+    secondaryColor: '#1e293b',
+    accentColor: '#ff5a3c',
+    backgroundColor: '#ffffff',
+    textColor: '#0f172a',
+    heroHeight: '600px',
+    overlayOpacity: 50,
+    overlayGradient: 'linear-gradient(to bottom, rgba(15, 23, 42, 0.3), rgba(15, 23, 42, 0.85))',
+    badgeStyle: 'rounded-full bg-orange-600 text-white font-mono uppercase text-xs px-2.5 py-1 font-black',
+    primaryBtnColor: '#ff5a3c',
+    secondaryBtnColor: '#1e293b',
+    btnHoverColor: '#e04f32',
+    borderRadius: '12px',
+    cardStyle: 'bordered',
+    cardBorderRadius: '16px',
+    cardShadowStyle: 'soft',
+    cardGlassEffect: false,
+    navStyle: 'sticky-rail',
+    navActiveColor: '#ff5a3c',
+    navHoverAnim: 'fade',
+    navIconStyle: 'lucide',
+    headingStyle: 'Space Grotesk',
+    bodyStyle: 'Inter',
+    fontSize: '14px',
+    scrollAnimation: 'fade-up',
+    hoverAnimation: 'zoom',
+    transitionSpeed: '0.3s'
+  });
+
+  // Media Picker Modals triggers
+  const [isGalleryModalOpen, setIsGalleryModalOpen] = useState(false);
+  const [isOgImageModalOpen, setIsOgImageModalOpen] = useState(false);
+  const [currentPickingFloorIndex, setCurrentPickingFloorIndex] = useState<number | null>(null);
 
   // Custom Confirmation Modal Dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -815,7 +998,7 @@ export default function SaaSPropertiesModule({
   };
 
   // Load Edit Form
-  const triggerEdit = (p: Property) => {
+  const triggerEdit = (p: Property | any) => {
     setEditingId(p.id);
     setCurrentPropertyId(p.id);
     setCoverProgress(100);
@@ -825,7 +1008,7 @@ export default function SaaSPropertiesModule({
     
     // Populate gallery uploads with existing image URLs
     const existingGalleryUrls = p.images || p.galleryImages || [];
-    const initialGallery = existingGalleryUrls.map((url, index) => {
+    const initialGallery = existingGalleryUrls.map((url: string, index: number) => {
       const isUploaded = url.includes('firebasestorage.googleapis.com') || url.includes('/v0/b/') || url.includes('firebase');
       return {
         id: isUploaded ? `existing-${index}-${Date.now()}` : `manual-gal-${index}-${Date.now()}-${Math.random()}`,
@@ -924,6 +1107,115 @@ export default function SaaSPropertiesModule({
       ownerContact: p.ownerContact || ''
     });
     setFormAmenities(p.amenities || []);
+
+    // Load new Enterprise PMS Workspace fields
+    setFormSlug(p.slug || '');
+    setFormLongDescription(p.longDescription || '');
+    setFormVisibility(p.visibility || 'Public');
+    setFormVisibilityPassword(p.visibilityPassword || '');
+    setFormDroneImages(p.droneImages ? p.droneImages.join(', ') : '');
+    setFormVideos(p.videos ? p.videos.join(', ') : '');
+    setFormTours360(p.tours360 ? p.tours360.join(', ') : '');
+    setFormLayoutPlans(p.layoutPlans ? p.layoutPlans.join(', ') : '');
+
+    // Specifications list fallbacks
+    const defaultSpecs = [
+      { key: 'Plot Size', value: p.plotSize || '' },
+      { key: 'Built-up Area', value: p.builtUpArea ? String(p.builtUpArea) : '' },
+      { key: 'Facing', value: p.facing || '' },
+      { key: 'Road Width', value: p.roadWidth || '' },
+      { key: 'Bedrooms', value: p.beds ? String(p.beds) : '' },
+      { key: 'Bathrooms', value: p.baths ? String(p.baths) : '' },
+      { key: 'Parking', value: String(p.parking || '') },
+      { key: 'Floors', value: p.totalFloors ? String(p.totalFloors) : '' },
+      { key: 'Furnishing', value: p.furnishingStatus || '' },
+      { key: 'Age of Property', value: String(p.propertyAge || '') }
+    ];
+    setFormSpecsList(p.customSpecs || defaultSpecs);
+
+    setFormNearbyPlaces(p.nearbyPlaces || []);
+    setFormFloorPlans(p.floorPlans || []);
+    
+    setFormLegal({
+      reraId: p.reraNumber || p.legal?.reraId || '',
+      dcConversion: p.legal?.dcConversion || 'Not Applicable',
+      eKhata: p.legal?.eKhata || 'None',
+      bankApproval: p.legal?.bankApproval || '',
+      clearTitle: p.legal?.clearTitle || 'Yes',
+      legalNotes: p.legal?.legalNotes || ''
+    });
+
+    setFormPricingExtra({
+      registrationCharges: p.pricing?.registrationCharges || '',
+      maintenance: p.pricing?.maintenance || '',
+      bookingAmount: p.pricing?.bookingAmount || '',
+      emiEstimated: p.pricing?.emiEstimated || '',
+      emiTenure: p.pricing?.emiTenure || '',
+      emiRate: p.pricing?.emiRate || '',
+      emiBankPartners: p.pricing?.emiBankPartners || ''
+    });
+
+    setFormInvestmentExtra({
+      futureDevelopments: p.investment?.futureDevelopments || '',
+      investmentNotes: p.investment?.investmentNotes || ''
+    });
+
+    setFormDocuments(p.documents || []);
+    
+    setFormVideosExtra({
+      siteVideos: p.mediaUrls?.siteVideos || '',
+      droneVideos: p.mediaUrls?.droneVideos || '',
+      virtualTourUrl: p.mediaUrls?.virtualTourUrl || '',
+      tour360Url: p.mediaUrls?.tour360Url || ''
+    });
+
+    setFormAgentExtra({
+      whatsapp: p.agent?.whatsapp || p.agentExtra?.whatsapp || '',
+      email: p.agent?.email || p.agentExtra?.email || ''
+    });
+
+    setFormReviews(p.reviewsList || []);
+    setFormFaqs(p.propertyFaqs || []);
+
+    setFormSeo({
+      metaTitle: p.seo?.metaTitle || '',
+      metaDescription: p.seo?.metaDescription || '',
+      keywords: p.seo?.keywords || '',
+      canonicalUrl: p.seo?.canonicalUrl || '',
+      ogImage: p.seo?.ogImage || ''
+    });
+
+    setFormAppearance(p.appearance || {
+      primaryColor: '#ff5a3c',
+      secondaryColor: '#1e293b',
+      accentColor: '#ff5a3c',
+      backgroundColor: '#ffffff',
+      textColor: '#0f172a',
+      heroHeight: '600px',
+      overlayOpacity: 50,
+      overlayGradient: 'linear-gradient(to bottom, rgba(15, 23, 42, 0.3), rgba(15, 23, 42, 0.85))',
+      badgeStyle: 'rounded-full bg-orange-600 text-white font-mono uppercase text-xs px-2.5 py-1 font-black',
+      primaryBtnColor: '#ff5a3c',
+      secondaryBtnColor: '#1e293b',
+      btnHoverColor: '#e04f32',
+      borderRadius: '12px',
+      cardStyle: 'bordered',
+      cardBorderRadius: '16px',
+      cardShadowStyle: 'soft',
+      cardGlassEffect: false,
+      navStyle: 'sticky-rail',
+      navActiveColor: '#ff5a3c',
+      navHoverAnim: 'fade',
+      navIconStyle: 'lucide',
+      headingStyle: 'Space Grotesk',
+      bodyStyle: 'Inter',
+      fontSize: '14px',
+      scrollAnimation: 'fade-up',
+      hoverAnimation: 'zoom',
+      transitionSpeed: '0.3s'
+    });
+
+    setActiveEditTab('Basic Information');
     setActiveSubTab('Add/Edit Property');
   };
 
@@ -949,6 +1241,101 @@ export default function SaaSPropertiesModule({
     setFormBadges({ badgeFeatured: false, badgeVerified: true, badgePremium: false, badgeHot: false, badgeNewLaunch: false, badgeTrending: false, badgeInvestmentOpportunity: false, badgeLimitedAvailability: false, badgePriceDrop: false, badgeBestSeller: false });
     setFormAgent({ assignedAgentId: '', agentContact: '', ownerName: '', ownerContact: '' });
     setFormAmenities([]);
+
+    // Clear Workspace fields
+    setFormSlug('');
+    setFormLongDescription('');
+    setFormVisibility('Public');
+    setFormVisibilityPassword('');
+    setFormDroneImages('');
+    setFormVideos('');
+    setFormTours360('');
+    setFormLayoutPlans('');
+    setFormSpecsList([
+      { key: 'Plot Size', value: '' },
+      { key: 'Built-up Area', value: '' },
+      { key: 'Facing', value: '' },
+      { key: 'Road Width', value: '' },
+      { key: 'Bedrooms', value: '' },
+      { key: 'Bathrooms', value: '' },
+      { key: 'Parking', value: '' },
+      { key: 'Floors', value: '' },
+      { key: 'Furnishing', value: '' },
+      { key: 'Age of Property', value: '' }
+    ]);
+    setFormNearbyPlaces([]);
+    setFormFloorPlans([]);
+    setFormLegal({
+      reraId: '',
+      dcConversion: 'Not Applicable',
+      eKhata: 'None',
+      bankApproval: '',
+      clearTitle: 'Yes',
+      legalNotes: ''
+    });
+    setFormPricingExtra({
+      registrationCharges: '',
+      maintenance: '',
+      bookingAmount: '',
+      emiEstimated: '',
+      emiTenure: '',
+      emiRate: '',
+      emiBankPartners: ''
+    });
+    setFormInvestmentExtra({
+      futureDevelopments: '',
+      investmentNotes: ''
+    });
+    setFormDocuments([]);
+    setFormVideosExtra({
+      siteVideos: '',
+      droneVideos: '',
+      virtualTourUrl: '',
+      tour360Url: ''
+    });
+    setFormAgentExtra({
+      whatsapp: '',
+      email: ''
+    });
+    setFormReviews([]);
+    setFormFaqs([]);
+    setFormSeo({
+      metaTitle: '',
+      metaDescription: '',
+      keywords: '',
+      canonicalUrl: '',
+      ogImage: ''
+    });
+    setFormAppearance({
+      primaryColor: '#ff5a3c',
+      secondaryColor: '#1e293b',
+      accentColor: '#ff5a3c',
+      backgroundColor: '#ffffff',
+      textColor: '#0f172a',
+      heroHeight: '600px',
+      overlayOpacity: 50,
+      overlayGradient: 'linear-gradient(to bottom, rgba(15, 23, 42, 0.3), rgba(15, 23, 42, 0.85))',
+      badgeStyle: 'rounded-full bg-orange-600 text-white font-mono uppercase text-xs px-2.5 py-1 font-black',
+      primaryBtnColor: '#ff5a3c',
+      secondaryBtnColor: '#1e293b',
+      btnHoverColor: '#e04f32',
+      borderRadius: '12px',
+      cardStyle: 'bordered',
+      cardBorderRadius: '16px',
+      cardShadowStyle: 'soft',
+      cardGlassEffect: false,
+      navStyle: 'sticky-rail',
+      navActiveColor: '#ff5a3c',
+      navHoverAnim: 'fade',
+      navIconStyle: 'lucide',
+      headingStyle: 'Space Grotesk',
+      bodyStyle: 'Inter',
+      fontSize: '14px',
+      scrollAnimation: 'fade-up',
+      hoverAnimation: 'zoom',
+      transitionSpeed: '0.3s'
+    });
+    setActiveEditTab('Basic Information');
   };
 
   const handleCreateOrUpdate = (e: React.FormEvent) => {
@@ -1050,7 +1437,30 @@ export default function SaaSPropertiesModule({
       ownerContact: formAgent.ownerContact,
 
       // Dynamic Taxonomies
-      amenities: formAmenities
+      amenities: formAmenities,
+
+      // Enterprise PMS Workspace Fields
+      slug: formSlug || formBasic.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+      longDescription: formLongDescription,
+      visibility: formVisibility,
+      visibilityPassword: formVisibilityPassword,
+      droneImages: formDroneImages ? formDroneImages.split(',').map(s => s.trim()).filter(Boolean) : [],
+      videos: formVideos ? formVideos.split(',').map(s => s.trim()).filter(Boolean) : [],
+      tours360: formTours360 ? formTours360.split(',').map(s => s.trim()).filter(Boolean) : [],
+      layoutPlans: formLayoutPlans ? formLayoutPlans.split(',').map(s => s.trim()).filter(Boolean) : [],
+      customSpecs: formSpecsList,
+      nearbyPlaces: formNearbyPlaces,
+      floorPlans: formFloorPlans,
+      legal: formLegal,
+      pricing: formPricingExtra,
+      investment: formInvestmentExtra,
+      documents: formDocuments,
+      mediaUrls: formVideosExtra,
+      agentExtra: formAgentExtra,
+      reviewsList: formReviews,
+      propertyFaqs: formFaqs,
+      seo: formSeo,
+      appearance: formAppearance
     };
 
     console.log("[CMS DEBUG 1] handleCreateOrUpdate click handler executed!");
@@ -1148,6 +1558,108 @@ export default function SaaSPropertiesModule({
       builderName: 'Prestige Group Builders'
     };
   }, [properties]);
+
+  // --- WORKSPACE AUTOSAVE & COMPREHENSIVE TAB DEFINITIONS ---
+  const [autosaveStatus, setAutosaveStatus] = useState<string>('Autosave standby');
+
+  useEffect(() => {
+    if (!formBasic.title && !formBasic.description) return;
+    setAutosaveStatus('Autosaving changes...');
+    const timer = setTimeout(() => {
+      const draft = {
+        formBasic, formLocation, formPricing, formSpecs, formProject, formInvestment, formBadges, formAgent, formAmenities,
+        formSlug, formLongDescription, formVisibility, formVisibilityPassword, formDroneImages, formVideos, formTours360, formLayoutPlans,
+        formSpecsList, formNearbyPlaces, formFloorPlans, formLegal, formPricingExtra, formInvestmentExtra, formDocuments,
+        formVideosExtra, formAgentExtra, formReviews, formFaqs, formSeo, formAppearance
+      };
+      localStorage.setItem('dvarix_pms_draft', JSON.stringify(draft));
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setAutosaveStatus(`Draft Vaulted at ${timeStr}`);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [
+    formBasic, formLocation, formPricing, formSpecs, formProject, formInvestment, formBadges, formAgent, formAmenities,
+    formSlug, formLongDescription, formVisibility, formVisibilityPassword, formDroneImages, formVideos, formTours360, formLayoutPlans,
+    formSpecsList, formNearbyPlaces, formFloorPlans, formLegal, formPricingExtra, formInvestmentExtra, formDocuments,
+    formVideosExtra, formAgentExtra, formReviews, formFaqs, formSeo, formAppearance
+  ]);
+
+  const completionPercentage = useMemo(() => {
+    let fieldsCount = 0;
+    let filledCount = 0;
+    
+    // Check Basic Info
+    fieldsCount += 3;
+    if (formBasic.title) filledCount++;
+    if (formBasic.description) filledCount++;
+    if (formBasic.image) filledCount++;
+    
+    // Check Location
+    fieldsCount += 2;
+    if (formLocation.city) filledCount++;
+    if (formLocation.locationName) filledCount++;
+
+    // Check Pricing
+    fieldsCount += 1;
+    if (formPricing.price) filledCount++;
+
+    // Check Specs
+    fieldsCount += 2;
+    if (formSpecs.sqft) filledCount++;
+    if (formSpecs.beds) filledCount++;
+
+    // Check SEO
+    fieldsCount += 2;
+    if (formSeo.metaTitle) filledCount++;
+    if (formSeo.metaDescription) filledCount++;
+
+    // Check Legal
+    fieldsCount += 1;
+    if (formLegal.reraId) filledCount++;
+
+    return Math.round((filledCount / fieldsCount) * 100);
+  }, [formBasic, formLocation, formPricing, formSpecs, formSeo, formLegal]);
+
+  const workspaceTabs = [
+    { id: 'Basic Information', name: 'Basic Information', icon: Building2, required: true, check: () => !!formBasic.title && !!formBasic.description },
+    { id: 'Media Gallery', name: 'Media Gallery', icon: Image, required: true, check: () => !!formBasic.image || galleryUploads.length > 0 },
+    { id: 'Property Specifications', name: 'Specifications', icon: Sliders, required: false, check: () => formSpecsList.length > 0 },
+    { id: 'Amenities', name: 'Amenities', icon: CheckSquare, required: false, check: () => formAmenities.length > 0 },
+    { id: 'Location & Nearby Places', name: 'Location & Map', icon: MapPin, required: true, check: () => !!formLocation.city && !!formLocation.locationName },
+    { id: 'Plot / Floor Layout', name: 'Floor Layouts', icon: Layers, required: false, check: () => formFloorPlans.length > 0 },
+    { id: 'Legal Information', name: 'Legal Profile', icon: ShieldCheck, required: false, check: () => !!formLegal.reraId },
+    { id: 'Pricing & Payment', name: 'Pricing & EMI', icon: DollarSign, required: true, check: () => !!formPricing.price },
+    { id: 'Investment Analysis', name: 'Investment Analysis', icon: TrendingUp, required: false, check: () => !!formInvestment.expectedROI || !!formInvestment.rentalYield },
+    { id: 'Documents', name: 'Brochures & Docs', icon: FileText, required: false, check: () => formDocuments.length > 0 },
+    { id: 'Videos & 360 Tour', name: 'Videos & 360 Tour', icon: Play, required: false, check: () => !!formVideosExtra.siteVideos || !!formVideosExtra.virtualTourUrl },
+    { id: 'Assigned Agent', name: 'Assigned Agent', icon: Users, required: false, check: () => !!formAgent.assignedAgentId },
+    { id: 'Reviews', name: 'Reviews / Feed', icon: MessageSquare, required: false, check: () => formReviews.length > 0 },
+    { id: 'FAQs', name: 'Listing FAQs', icon: HelpCircle, required: false, check: () => formFaqs.length > 0 },
+    { id: 'SEO', name: 'SEO Metadata', icon: Search, required: false, check: () => !!formSeo.metaTitle && !!formSeo.metaDescription },
+    { id: 'Appearance & Branding', name: 'Custom Branding', icon: Palette, required: false, check: () => formAppearance.primaryColor !== '#ff5a3c' },
+    { id: 'Publish Settings', name: 'Publish Controls', icon: CheckCircle2, required: true, check: () => !!formBasic.status }
+  ];
+
+  const handleNavigateTab = (dir: 'next' | 'prev') => {
+    const ids = workspaceTabs.map(t => t.id);
+    const currIdx = ids.indexOf(activeEditTab);
+    if (dir === 'next') {
+      const nextIdx = (currIdx + 1) % ids.length;
+      setActiveEditTab(ids[nextIdx]);
+    } else {
+      const prevIdx = (currIdx - 1 + ids.length) % ids.length;
+      setActiveEditTab(ids[prevIdx]);
+    }
+  };
+
+  const generateSlug = () => {
+    if (!formBasic.title) return;
+    const generated = formBasic.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+    setFormSlug(generated);
+  };
 
   return (
     <div className="space-y-6 text-left max-w-7xl mx-auto" id="saas-pms-custom-panel">
@@ -1694,919 +2206,89 @@ export default function SaaSPropertiesModule({
 
       {/* TAB C: ADD OR EDIT PROPERTY FORM */}
       {activeSubTab === 'Add/Edit Property' && (
-        <form onSubmit={handleCreateOrUpdate} className="bg-white border border-slate-205 rounded-2xl p-6 shadow-3xs space-y-6 animate-in fade-in duration-150">
-          <div className="flex justify-between items-center border-b border-slate-100 pb-3 flex-wrap">
-            <div className="space-y-0.5 text-left">
-              <h3 className="font-extrabold text-slate-900 tracking-tight text-sm">
-                {editingId ? `Edit Listing Specifications: #${editingId}` : 'Publish New Real-Estate Asset Profile'}
-              </h3>
-              <p className="text-[11px] text-slate-450 leading-relaxed font-sans">Fill in parameters categorized below. Unfilled optional fields fallback to beautiful template designs.</p>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="py-1.5 px-3 border border-slate-200 hover:bg-slate-50 text-[11px] font-bold rounded-lg text-slate-600 transition"
-              >
-                Clear Form
-              </button>
-              <button
-                type="submit"
-                className="py-1.5 px-4 bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[11px] rounded-lg transition"
-              >
-                {editingId ? 'Update Listing Details' : 'Publish Property Profile'}
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-left">
-            
-            {/* 1. BASIC INFORMATION */}
-            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-150 space-y-3.5">
-              <h4 className="font-black text-slate-800 uppercase font-mono tracking-wider text-[10px] flex items-center gap-1 text-sky-600">🏢 Basic Specifications</h4>
-              
-              <div className="space-y-1">
-                <label className="font-extrabold text-slate-505 block">Listing Title *</label>
-                <input
-                  type="text" required
-                  value={formBasic.title}
-                  onChange={(e) => setFormBasic({ ...formBasic, title: e.target.value })}
-                  placeholder="e.g. Sarjapur Landmark Penthouse"
-                  className="w-full border border-slate-200 bg-white p-2.5 rounded-lg outline-none font-semibold text-slate-800"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Property Code</label>
-                  <input
-                    type="text"
-                    value={formBasic.code}
-                    onChange={(e) => setFormBasic({ ...formBasic, code: e.target.value })}
-                    placeholder="e.g. PL-5324"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Property Type</label>
-                  <select
-                    value={formBasic.type}
-                    onChange={(e) => setFormBasic({ ...formBasic, type: e.target.value })}
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-semibold text-slate-700 text-xs cursor-pointer"
-                  >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>{c.title}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Property Category</label>
-                  <select
-                    value={formBasic.category}
-                    onChange={(e) => setFormBasic({ ...formBasic, category: e.target.value })}
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-semibold text-slate-700 text-xs cursor-pointer"
-                  >
-                    {taxCategories.filter(c => c.status !== 'Disabled').map((c) => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Marketing Status</label>
-                  <select
-                    value={formBasic.status}
-                    onChange={(e) => setFormBasic({ ...formBasic, status: e.target.value })}
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-semibold text-slate-700 text-xs cursor-pointer"
-                  >
-                    {taxStatuses.map((s) => (
-                      <option key={s.id} value={s.name}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-extrabold text-slate-505 block">Short / Detailed Description</label>
-                <textarea
-                  value={formBasic.description}
-                  onChange={(e) => setFormBasic({ ...formBasic, description: e.target.value })}
-                  placeholder="Breathtaking architectural masterpiece in Bengaluru corridor offering full smart-home operations..."
-                  rows={3}
-                  className="w-full border border-slate-200 bg-white p-2.5 rounded-lg outline-none text-slate-700"
-                />
-              </div>
-
-              {/* Image Upload Status Messages */}
-              {(imageError || imageSuccess) && (
-                <div className="p-3.5 rounded-xl border text-xs font-medium space-y-1 animate-fade-in">
-                  {imageError && (
-                    <div className="text-red-600 border-red-100 bg-red-50 flex items-center gap-2 p-2 rounded-lg">
-                      <AlertTriangle className="h-4 w-4 shrink-0" />
-                      <span>{imageError}</span>
-                    </div>
-                  )}
-                  {imageSuccess && (
-                    <div className="text-emerald-600 border-emerald-100 bg-emerald-50 flex items-center gap-2 p-2 rounded-lg">
-                      <CheckCircle2 className="h-4 w-4 shrink-0 animate-bounce" />
-                      <span>{imageSuccess}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Cover Image Upload (Drag & Drop) */}
-              <div className="space-y-2">
-                <label className="font-extrabold text-slate-800 block text-xs uppercase font-mono tracking-wider">🏠 Cover Image Upload</label>
-                
-                {formBasic.image ? (
-                  <div className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-50 h-48 flex items-center justify-center">
-                    <img 
-                      src={formBasic.image} 
-                      alt="Cover Preview" 
-                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" 
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                      <label className="p-2 bg-white text-slate-800 rounded-full hover:bg-slate-100 transition cursor-pointer shadow-md">
-                        <RefreshCw className="h-4 w-4" />
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          className="hidden" 
-                          onChange={(e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              handleCoverUpload(e.target.files[0]);
-                            }
-                          }}
-                        />
-                      </label>
-                      <button 
-                        type="button" 
-                        onClick={handleRemoveCover}
-                        className="p-2 bg-red-600 text-white rounded-full hover:bg-red-700 transition shadow-md"
-                        title="Remove cover image"
-                      >
-                        <Trash className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="absolute bottom-2 left-2 bg-slate-900/80 text-white px-2.5 py-1 rounded-md text-[10px] font-mono tracking-wider">
-                      COVER SELECTED
-                    </div>
-                  </div>
-                ) : (
-                  <div 
-                    onDragOver={handleDragOverCover}
-                    onDragLeave={handleDragLeaveCover}
-                    onDrop={handleDropCover}
-                    className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center transition cursor-pointer ${
-                      dragActiveCover 
-                        ? 'border-sky-500 bg-sky-50/50' 
-                        : 'border-slate-300 hover:border-sky-400 bg-white hover:bg-slate-50/50'
-                    }`}
-                  >
-                    <input 
-                      id="cover-file-input"
-                      type="file" 
-                      accept="image/jpeg,image/png,image/webp" 
-                      className="hidden" 
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          handleCoverUpload(e.target.files[0]);
-                        }
-                      }}
-                    />
-                    <label htmlFor="cover-file-input" className="flex flex-col items-center cursor-pointer w-full">
-                      <div className="p-3 bg-sky-50 rounded-full text-sky-600 mb-3">
-                        <Building2 className="h-6 w-6" />
-                      </div>
-                      <span className="text-xs font-bold text-slate-700">Drag & Drop Cover Image</span>
-                      <span className="text-[10px] text-slate-400 mt-1">Supports JPG, PNG, WEBP (Max 10MB)</span>
-                      <span className="mt-3 px-3.5 py-1.5 bg-sky-100 text-sky-700 font-extrabold text-[10px] rounded-lg tracking-wider uppercase">
-                        Browse Files
-                      </span>
-                    </label>
-                  </div>
-                )}
-
-                {coverUploading && (
-                  <div className="space-y-1 bg-sky-50 border border-sky-150 p-2.5 rounded-lg">
-                    <div className="flex justify-between text-[10px] font-black text-sky-700 font-mono">
-                      <span>UPLOADING COVER...</span>
-                      <span>{coverProgress}%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                      <div className="bg-sky-600 h-full transition-all duration-300" style={{ width: `${coverProgress}%` }}></div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="mt-2.5 space-y-1">
-                  <label className="text-[10px] font-extrabold text-slate-500 font-mono block uppercase">Or Enter Cover Image URL</label>
-                  <input
-                    type="url"
-                    placeholder="https://example.com/image.jpg"
-                    value={manualCoverUrl}
-                    onChange={(e) => setManualCoverUrl(e.target.value)}
-                    className="w-full border border-slate-200 bg-white p-2.5 text-xs rounded-lg font-mono focus:border-sky-500 focus:outline-none"
-                  />
-                  {manualCoverUrl && !isValidImageUrl(manualCoverUrl) && (
-                    <p className="text-[10px] text-red-500 font-mono">Please enter a valid HTTP/HTTPS image URL.</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Gallery Image Upload */}
-              <div className="space-y-3 pt-2">
-                <div className="flex justify-between items-center">
-                  <label className="font-extrabold text-slate-800 block text-xs uppercase font-mono tracking-wider">📷 Gallery Upload</label>
-                  <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-mono">
-                    {galleryUploads.length} / 25 IMAGES
-                  </span>
-                </div>
-
-                <div 
-                  onDragOver={handleDragOverGallery}
-                  onDragLeave={handleDragLeaveGallery}
-                  onDrop={handleDropGallery}
-                  className={`border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center transition cursor-pointer ${
-                    dragActiveGallery 
-                      ? 'border-sky-500 bg-sky-50/50' 
-                      : 'border-slate-300 hover:border-sky-400 bg-white hover:bg-slate-50/50'
-                  }`}
-                >
-                  <input 
-                    id="gallery-file-input"
-                    type="file" 
-                    multiple 
-                    accept="image/jpeg,image/png,image/webp" 
-                    className="hidden" 
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files.length > 0) {
-                        handleGalleryUpload(e.target.files);
-                      }
-                    }}
-                  />
-                  <label htmlFor="gallery-file-input" className="flex flex-col items-center cursor-pointer w-full">
-                    <div className="p-2.5 bg-sky-50 rounded-full text-sky-600 mb-2">
-                      <PlusCircle className="h-5.5 w-5.5" />
-                    </div>
-                    <span className="text-xs font-bold text-slate-700">Drag & Drop Gallery Images</span>
-                    <span className="text-[10px] text-slate-400 mt-0.5">Select up to 25 high-resolution photographs</span>
-                    <span className="mt-2.5 px-3 py-1 bg-sky-100 text-sky-700 font-extrabold text-[10px] rounded-lg tracking-wider uppercase">
-                      Select Multiple Files
-                    </span>
-                  </label>
-                </div>
-
-                <div className="mt-2.5 space-y-1">
-                  <label className="text-[10px] font-extrabold text-slate-500 font-mono block uppercase">Or Enter Gallery Image URL(s) (Comma-separated)</label>
-                  <textarea
-                    rows={2}
-                    placeholder="https://example.com/img1.jpg, https://example.com/img2.jpg"
-                    value={manualGalleryUrls}
-                    onChange={(e) => handleManualGalleryUrlsChange(e.target.value)}
-                    className="w-full border border-slate-200 bg-white p-2.5 text-xs rounded-lg font-mono focus:border-sky-500 focus:outline-none"
-                  />
-                  {manualGalleryUrls && manualGalleryUrls.split(',').some(url => url.trim() && !isValidImageUrl(url)) && (
-                    <p className="text-[10px] text-red-500 font-mono">Please make sure all URLs entered are valid HTTP/HTTPS image links.</p>
-                  )}
-                </div>
-
-                {/* Previews & Sorting Container */}
-                {galleryUploads.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-96 overflow-y-auto p-1.5 border border-slate-150 rounded-xl bg-slate-50/30">
-                    {galleryUploads.map((img, index) => (
-                      <div key={img.id} className="relative group bg-white border border-slate-200 rounded-lg p-1 shadow-3xs flex flex-col justify-between overflow-hidden">
-                        
-                        {/* Thumbnail View */}
-                        <div className="relative aspect-video rounded-md overflow-hidden bg-slate-100 flex items-center justify-center">
-                          {img.uploading ? (
-                            <div className="absolute inset-0 bg-slate-900/60 flex flex-col items-center justify-center text-white p-2">
-                              <span className="text-[9px] font-black tracking-wider uppercase font-mono animate-pulse">Uploading</span>
-                              <span className="text-[11px] font-mono font-bold mt-1">{img.progress}%</span>
-                              <div className="w-full bg-white/20 h-1 rounded-full overflow-hidden mt-1 max-w-[50px]">
-                                <div className="bg-white h-full" style={{ width: `${img.progress}%` }}></div>
-                              </div>
-                            </div>
-                          ) : (
-                            <img src={img.url} alt={`Gallery ${index}`} className="w-full h-full object-cover animate-fade-in" referrerPolicy="no-referrer" />
-                          )}
-
-                          {/* Quick delete / make cover overlays */}
-                          {!img.uploading && img.url && (
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleSetAsCover(img.url)}
-                                className="p-1 bg-sky-600 text-white rounded-md hover:bg-sky-700 transition"
-                                title="Set as main cover image"
-                              >
-                                <Check className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveGalleryImage(img.id, img.url)}
-                                className="p-1 bg-red-600 text-white rounded-md hover:bg-red-700 transition"
-                                title="Delete image"
-                              >
-                                <Trash className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Title and control actions */}
-                        <div className="mt-1.5 flex justify-between items-center px-1">
-                          <span className="text-[9px] font-mono text-slate-400 truncate max-w-[65px]">
-                            #{index + 1} Image
-                          </span>
-                          
-                          {/* Reordering actions */}
-                          <div className="flex gap-0.5">
-                            <button
-                              type="button"
-                              disabled={index === 0}
-                              onClick={() => handleMoveGalleryImage(index, 'up')}
-                              className="p-1 bg-slate-50 border border-slate-150 rounded hover:bg-slate-100 text-slate-500 disabled:opacity-30 disabled:pointer-events-none"
-                              title="Move up / left"
-                            >
-                              <span className="text-[8px] font-bold">◀</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={index === galleryUploads.length - 1}
-                              onClick={() => handleMoveGalleryImage(index, 'down')}
-                              className="p-1 bg-slate-50 border border-slate-150 rounded hover:bg-slate-100 text-slate-500 disabled:opacity-30 disabled:pointer-events-none"
-                              title="Move down / right"
-                            >
-                              <span className="text-[8px] font-bold">▶</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Is Active Cover Badge Indicator */}
-                        {formBasic.image === img.url && img.url && (
-                          <div className="absolute top-1.5 left-1.5 bg-emerald-600 text-white px-1.5 py-0.5 rounded text-[8px] font-black font-mono tracking-wider uppercase shadow-sm">
-                            Active Cover
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* 2. LOCATION DETAILS */}
-            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-150 space-y-3.5">
-              <h4 className="font-black text-slate-800 uppercase font-mono tracking-wider text-[10px] flex items-center gap-1 text-sky-600">📍 Geographic Location Mapping</h4>
-              
-              <div className="space-y-1">
-                <label className="font-extrabold text-slate-505 block">Location / Neighborhood Name</label>
-                <select
-                  value={formLocation.locationName}
-                  onChange={(e) => {
-                    const selLoc = taxLocations.find(l => l.name === e.target.value);
-                    setFormLocation({
-                      ...formLocation,
-                      locationName: e.target.value,
-                      city: selLoc ? selLoc.city : formLocation.city,
-                      state: selLoc ? selLoc.state : formLocation.state
-                    });
-                  }}
-                  className="w-full border border-slate-200 bg-white p-2.5 rounded-lg text-xs font-semibold text-slate-705 cursor-pointer"
-                >
-                  <option value="">- Select Registered Location -</option>
-                  {taxLocations.filter(l => l.status !== 'Disabled').map(l => (
-                    <option key={l.id} value={l.name}>{l.name} ({l.city})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block font-mono text-[10px]">City *</label>
-                  <input
-                    type="text" required
-                    value={formLocation.city}
-                    onChange={(e) => setFormLocation({ ...formLocation, city: e.target.value })}
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-555 block">State</label>
-                  <input
-                    type="text"
-                    value={formLocation.state}
-                    onChange={(e) => setFormLocation({ ...formLocation, state: e.target.value })}
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-555 block">Country</label>
-                  <input
-                    type="text"
-                    value={formLocation.country}
-                    onChange={(e) => setFormLocation({ ...formLocation, country: e.target.value })}
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-extrabold text-slate-505 block">Landmark Accents</label>
-                <input
-                  type="text"
-                  value={formLocation.landmark}
-                  onChange={(e) => setFormLocation({ ...formLocation, landmark: e.target.value })}
-                  placeholder="e.g. Near Metro Rail Station Interchange"
-                  className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-extrabold text-slate-505 block">Google Maps Location Link</label>
-                <input
-                  type="text"
-                  value={formLocation.googleMapLocation}
-                  onChange={(e) => setFormLocation({ ...formLocation, googleMapLocation: e.target.value })}
-                  placeholder="https://goo.gl/maps/..."
-                  className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-mono text-[11px]"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Latitude Scale</label>
-                  <input
-                    type="text"
-                    value={formLocation.latitude}
-                    onChange={(e) => setFormLocation({ ...formLocation, latitude: e.target.value })}
-                    placeholder="12.9716"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Longitude Scale</label>
-                  <input
-                    type="text"
-                    value={formLocation.longitude}
-                    onChange={(e) => setFormLocation({ ...formLocation, longitude: e.target.value })}
-                    placeholder="77.5946"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-mono"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 3. PRICING & VALUATION */}
-            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-150 space-y-3.5">
-              <h4 className="font-black text-slate-800 uppercase font-mono tracking-wider text-[10px] flex items-center gap-1 text-sky-600">💰 Pricing Models</h4>
-              
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Price in INR (₹) *</label>
-                  <input
-                    type="number" required
-                    value={formPricing.price}
-                    onChange={(e) => setFormPricing({ ...formPricing, price: e.target.value })}
-                    placeholder="e.g. 7800000"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-mono font-bold"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Price Per Sq.Ft (₹)</label>
-                  <input
-                    type="number"
-                    value={formPricing.pricePerSqFt}
-                    onChange={(e) => setFormPricing({ ...formPricing, pricePerSqFt: e.target.value })}
-                    placeholder="6500"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Price Status / Disclaimer</label>
-                  <input
-                    type="text"
-                    value={formPricing.priceStatus}
-                    onChange={(e) => setFormPricing({ ...formPricing, priceStatus: e.target.value })}
-                    placeholder="All-inclusive, Price on Request, negotiable..."
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                  />
-                </div>
-                <div className="pt-6 flex items-center">
-                  <label className="flex items-center gap-2 font-bold text-slate-655 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formPricing.negotiable}
-                      onChange={(e) => setFormPricing({ ...formPricing, negotiable: e.target.checked })}
-                      className="rounded text-sky-500 focus:ring-sky-500"
-                    /> Price is Negotiable
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            {/* 4. DIMENSIONAL SPECIFICATIONS */}
-            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-150 space-y-3.5">
-              <h4 className="font-black text-slate-800 uppercase font-mono tracking-wider text-[10px] flex items-center gap-1 text-sky-600">📐 Architectural Dimensions</h4>
-              
-              <div className="grid grid-cols-3 gap-2">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block font-mono text-[10px]">Area SqFt</label>
-                  <input
-                    type="number"
-                    value={formSpecs.sqft}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, sqft: e.target.value })}
-                    placeholder="1200"
-                    className="w-full border border-slate-200 bg-white p-2 rounded-lg font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block font-mono text-[10px]">Plot Size</label>
-                  <input
-                    type="text"
-                    value={formSpecs.plotSize}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, plotSize: e.target.value })}
-                    placeholder="30 x 40"
-                    className="w-full border border-slate-200 bg-white p-2 rounded-lg font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block font-mono text-[10px]">Built-Up Area</label>
-                  <input
-                    type="number"
-                    value={formSpecs.builtUpArea}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, builtUpArea: e.target.value })}
-                    placeholder="1000"
-                    className="w-full border border-slate-200 bg-white p-2 rounded-lg font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-4 gap-1.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-[10px] text-slate-505 block">BHK Beds</label>
-                  <input
-                    type="number"
-                    value={formSpecs.beds}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, beds: e.target.value })}
-                    placeholder="3"
-                    className="w-full border border-slate-200 bg-white p-2 rounded-lg"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-[10px] text-slate-505 block">Baths</label>
-                  <input
-                    type="number"
-                    value={formSpecs.baths}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, baths: e.target.value })}
-                    placeholder="3"
-                    className="w-full border border-slate-200 bg-white p-2 rounded-lg"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-[10px] text-slate-505 block">Parking slots</label>
-                  <input
-                    type="text"
-                    value={formSpecs.parking}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, parking: e.target.value })}
-                    placeholder="1 Covered"
-                    className="w-full border border-slate-200 bg-white p-2 rounded-lg"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-[10px] text-slate-505 block">Facing</label>
-                  <select
-                    value={formSpecs.facing}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, facing: e.target.value })}
-                    className="w-full border border-slate-200 bg-white p-2 rounded-lg text-[11px]"
-                  >
-                    <option value="East">East</option>
-                    <option value="West">West</option>
-                    <option value="North">North</option>
-                    <option value="South">South</option>
-                    <option value="North-East">North-East</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-555 block text-[10px]">Furnishing</label>
-                  <select
-                    value={formSpecs.furnishingStatus}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, furnishingStatus: e.target.value })}
-                    className="w-full border p-2 rounded-lg bg-white"
-                  >
-                    <option value="Unfurnished">Unfurnished</option>
-                    <option value="Semi-Furnished">Semi-Furnished</option>
-                    <option value="Fully Furnished">Fully Furnished</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-555 block text-[10px]">Floor lvl</label>
-                  <input
-                    type="number"
-                    value={formSpecs.floorNumber}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, floorNumber: e.target.value })}
-                    placeholder="2"
-                    className="w-full border p-2 rounded-lg bg-white font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-555 block text-[10px]">Age (Yrs)</label>
-                  <input
-                    type="text"
-                    value={formSpecs.propertyAge}
-                    onChange={(e) => setFormSpecs({ ...formSpecs, propertyAge: e.target.value })}
-                    placeholder="New / 2 Years"
-                    className="w-full border p-2 rounded-lg bg-white"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 5. PROJECT & DEVELOPERS INFO */}
-            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-150 space-y-3.5">
-              <h4 className="font-black text-slate-800 uppercase font-mono tracking-wider text-[10px] flex items-center gap-1 text-sky-600">🏗️ Project & Builder compliance</h4>
-              
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Project Name (Recommended)</label>
-                  <input
-                    type="text"
-                    value={formProject.projectName}
-                    onChange={(e) => setFormProject({ ...formProject, projectName: e.target.value })}
-                    placeholder="e.g. Prestige Lakeside"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Builder / Developer Name</label>
-                  <input
-                    type="text"
-                    value={formProject.builderName}
-                    onChange={(e) => setFormProject({ ...formProject, builderName: e.target.value })}
-                    placeholder="Prestige Group Builders"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">RERA Number</label>
-                  <input
-                    type="text"
-                    value={formProject.reraNumber}
-                    onChange={(e) => setFormProject({ ...formProject, reraNumber: e.target.value })}
-                    placeholder="e.g. PRM/KA/RERA/..."
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-mono text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Possession Date</label>
-                  <input
-                    type="text"
-                    value={formProject.possessionDate}
-                    onChange={(e) => setFormProject({ ...formProject, possessionDate: e.target.value })}
-                    placeholder="Dec 2027 / Ready"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 6. INVESTMENT PRESETS */}
-            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-150 space-y-3.5">
-              <h4 className="font-black text-slate-800 uppercase font-mono tracking-wider text-[10px] flex items-center gap-1 text-sky-600">📈 Investment Indicators</h4>
-              
-              <div className="grid grid-cols-3 gap-2">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-555 block font-mono text-[9px]">Expected ROI (%)</label>
-                  <input
-                    type="text"
-                    value={formInvestment.expectedROI}
-                    onChange={(e) => setFormInvestment({ ...formInvestment, expectedROI: e.target.value })}
-                    placeholder="9.6"
-                    className="w-full border p-2 rounded-lg bg-white font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-555 block font-mono text-[9px]">Rental Yield (%)</label>
-                  <input
-                    type="text"
-                    value={formInvestment.rentalYield}
-                    onChange={(e) => setFormInvestment({ ...formInvestment, rentalYield: e.target.value })}
-                    placeholder="4.2"
-                    className="w-full border p-2 rounded-lg bg-white font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-555 block font-mono text-[9px]">Investment Score</label>
-                  <input
-                    type="number"
-                    value={formInvestment.investmentScore}
-                    onChange={(e) => setFormInvestment({ ...formInvestment, investmentScore: e.target.value })}
-                    placeholder="92"
-                    className="w-full border p-2 rounded-lg bg-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Appreciation Potential</label>
-                  <select
-                    value={formInvestment.appreciationPotential}
-                    onChange={(e) => setFormInvestment({ ...formInvestment, appreciationPotential: e.target.value })}
-                    className="w-full border p-2.5 rounded-lg bg-white"
-                  >
-                    <option value="Moderate">Moderate Growth</option>
-                    <option value="High">High Growth</option>
-                    <option value="Exceptional">Exceptional Growth</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Demand Level Badge</label>
-                  <select
-                    value={formInvestment.demandLevel}
-                    onChange={(e) => setFormInvestment({ ...formInvestment, demandLevel: e.target.value })}
-                    className="w-full border p-2.5 rounded-lg bg-white font-bold"
-                  >
-                    <option value="Moderate Demand">Moderate Demand</option>
-                    <option value="High Demand">High Demand</option>
-                    <option value="Very High Demand">Very High Demand</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* 7. MARKETING DISPLAY BADGES TOGGLES */}
-            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-150 space-y-3.5 md:col-span-2">
-              <h4 className="font-black text-slate-800 uppercase font-mono tracking-wider text-[10px] flex items-center gap-1 text-sky-600">🏷️ Marketing & Verification Display Badges</h4>
-              
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 font-bold text-slate-655">
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgeVerified} onChange={(e) => setFormBadges({ ...formBadges, badgeVerified: e.target.checked })} className="rounded text-sky-500" />
-                  <span>Verified Listing</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgeFeatured} onChange={(e) => setFormBadges({ ...formBadges, badgeFeatured: e.target.checked })} className="rounded text-sky-500" />
-                  <span>Featured Property</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgePremium} onChange={(e) => setFormBadges({ ...formBadges, badgePremium: e.target.checked })} className="rounded text-sky-500 animate-pulse" />
-                  <span>Premium Tier</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgeHot} onChange={(e) => setFormBadges({ ...formBadges, badgeHot: e.target.checked })} className="rounded text-sky-500" />
-                  <span>Hot Asset 🔥</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgeNewLaunch} onChange={(e) => setFormBadges({ ...formBadges, badgeNewLaunch: e.target.checked })} className="rounded text-sky-500" />
-                  <span>New Launch 🚀</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgeTrending} onChange={(e) => setFormBadges({ ...formBadges, badgeTrending: e.target.checked })} className="rounded text-sky-500" />
-                  <span>Trending Property</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgeInvestmentOpportunity} onChange={(e) => setFormBadges({ ...formBadges, badgeInvestmentOpportunity: e.target.checked })} className="rounded text-sky-500" />
-                  <span>High ROI Deal</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgeLimitedAvailability} onChange={(e) => setFormBadges({ ...formBadges, badgeLimitedAvailability: e.target.checked })} className="rounded text-sky-500" />
-                  <span>Limited Space ⏳</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgePriceDrop} onChange={(e) => setFormBadges({ ...formBadges, badgePriceDrop: e.target.checked })} className="rounded text-sky-500" />
-                  <span>Price Drop 📉</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition border border-transparent hover:border-slate-150">
-                  <input type="checkbox" checked={formBadges.badgeBestSeller} onChange={(e) => setFormBadges({ ...formBadges, badgeBestSeller: e.target.checked })} className="rounded text-sky-500" />
-                  <span>Best Seller 👑</span>
-                </label>
-              </div>
-            </div>
-
-            {/* 8. AGENT & OWNER INFORMATION */}
-            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-150 space-y-3.5 md:col-span-2">
-              <h4 className="font-black text-slate-800 uppercase font-mono tracking-wider text-[10px] flex items-center gap-1 text-sky-600">👤 Contact Personnel Information</h4>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Assigned Advisory Agent *</label>
-                  <select
-                    value={formAgent.assignedAgentId}
-                    onChange={(e) => setFormAgent({ ...formAgent, assignedAgentId: e.target.value })}
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg text-xs"
-                  >
-                    <option value="">- Select Active Advisor -</option>
-                    {agents.map(a => <option key={a.id} value={a.id}>{a.name} ({a.role})</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Agent Direct Contact</label>
-                  <input
-                    type="text"
-                    value={formAgent.agentContact}
-                    onChange={(e) => setFormAgent({ ...formAgent, agentContact: e.target.value })}
-                    placeholder="+91 63009 84846"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Owner Name (Private Record)</label>
-                  <input
-                    type="text"
-                    value={formAgent.ownerName}
-                    onChange={(e) => setFormAgent({ ...formAgent, ownerName: e.target.value })}
-                    placeholder="Sri Devanand Reddy"
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-extrabold text-slate-505 block">Owner Contact (Private Record)</label>
-                  <input
-                    type="text"
-                    value={formAgent.ownerContact}
-                    onChange={(e) => setFormAgent({ ...formAgent, ownerContact: e.target.value })}
-                    placeholder="+91 94402..."
-                    className="w-full border border-slate-200 bg-white p-2.5 rounded-lg font-mono"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 9. AMENITIES SELECTION CHECKLIST */}
-            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-150 space-y-3.5 md:col-span-2">
-              <h4 className="font-black text-slate-800 uppercase font-mono tracking-wider text-[10px] flex items-center gap-1 text-sky-600">⚓ Dynamic Amenities Checklist</h4>
-              <p className="text-[11px] text-slate-450 font-sans leading-relaxed">Toggle amenities registered in taxonomy registry. Customer searches actively look up these metrics.</p>
-              
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 pt-1">
-                {taxAmenities.map((am) => {
-                  const isChecked = formAmenities.includes(am.name);
-                  return (
-                    <label 
-                      key={am.id} 
-                      className={`flex items-center gap-2 cursor-pointer p-2 rounded-xl border transition-all text-xs font-semibold ${
-                        isChecked 
-                          ? 'bg-sky-50 border-sky-200 text-sky-800 font-extrabold' 
-                          : 'bg-white border-slate-205 hover:bg-slate-50 text-slate-600'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setFormAmenities([...formAmenities, am.name]);
-                          } else {
-                            setFormAmenities(formAmenities.filter(x => x !== am.name));
-                          }
-                        }}
-                        className="rounded text-sky-500 focus:ring-sky-500 cursor-pointer h-4 w-4"
-                      />
-                      <span>{am.name}</span>
-                    </label>
-                  );
-                })}
-                {taxAmenities.length === 0 && (
-                  <div className="col-span-full text-center py-4 bg-white border border-slate-200 rounded-xl font-mono text-[10px] uppercase font-bold text-slate-400">
-                    No amenities registered in lookup tables. Navigate to 'Manage Taxonomies' to add features.
-                  </div>
-                )}
-              </div>
-            </div>
-
-          </div>
-
-          <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={resetForm}
-              className="py-2.5 px-5 border border-slate-202 hover:bg-slate-50 text-xs font-bold rounded-xl text-slate-600 transition cursor-pointer"
-            >
-              Reset / Cancel Form
-            </button>
-            <button
-              type="submit"
-              className="py-2.5 px-6 bg-slate-900 hover:bg-sky-600 text-white font-extrabold text-xs rounded-xl shadow-xs transition cursor-pointer"
-            >
-              {editingId ? 'Update Real Estate Asset File' : 'Publish Asset Profile'}
-            </button>
-          </div>
-        </form>
+        <EnterprisePMSWorkspace
+          editingId={editingId}
+          currentPropertyId={currentPropertyId}
+          completionPercentage={completionPercentage}
+          autosaveStatus={autosaveStatus}
+          activeEditTab={activeEditTab}
+          setActiveEditTab={setActiveEditTab}
+          workspaceTabs={workspaceTabs}
+          handleNavigateTab={handleNavigateTab}
+          generateSlug={generateSlug}
+          resetForm={resetForm}
+          handleCreateOrUpdate={handleCreateOrUpdate}
+          categories={categories}
+          taxCategories={taxCategories}
+          taxStatuses={taxStatuses}
+          agents={agents}
+          galleryUploads={galleryUploads}
+          setGalleryUploads={setGalleryUploads}
+          uploadedCoverUrl={uploadedCoverUrl}
+          setUploadedCoverUrl={setUploadedCoverUrl}
+          manualCoverUrl={manualCoverUrl}
+          setManualCoverUrl={setManualCoverUrl}
+          formBasic={formBasic}
+          setFormBasic={setFormBasic}
+          formLocation={formLocation}
+          setFormLocation={setFormLocation}
+          formPricing={formPricing}
+          setFormPricing={setFormPricing}
+          formSpecs={formSpecs}
+          setFormSpecs={setFormSpecs}
+          formProject={formProject}
+          setFormProject={setFormProject}
+          formInvestment={formInvestment}
+          setFormInvestment={setFormInvestment}
+          formBadges={formBadges}
+          setFormBadges={setFormBadges}
+          formAgent={formAgent}
+          setFormAgent={setFormAgent}
+          formAmenities={formAmenities}
+          setFormAmenities={setFormAmenities}
+          formSlug={formSlug}
+          setFormSlug={setFormSlug}
+          formLongDescription={formLongDescription}
+          setFormLongDescription={setFormLongDescription}
+          formVisibility={formVisibility}
+          setFormVisibility={setFormVisibility}
+          formVisibilityPassword={formVisibilityPassword}
+          setFormVisibilityPassword={setFormVisibilityPassword}
+          formDroneImages={formDroneImages}
+          setFormDroneImages={setFormDroneImages}
+          formVideos={formVideos}
+          setFormVideos={setFormVideos}
+          formTours360={formTours360}
+          setFormTours360={setFormTours360}
+          formLayoutPlans={formLayoutPlans}
+          setFormLayoutPlans={setFormLayoutPlans}
+          formSpecsList={formSpecsList}
+          setFormSpecsList={setFormSpecsList}
+          formNearbyPlaces={formNearbyPlaces}
+          setFormNearbyPlaces={setFormNearbyPlaces}
+          formFloorPlans={formFloorPlans}
+          setFormFloorPlans={setFormFloorPlans}
+          formLegal={formLegal}
+          setFormLegal={setFormLegal}
+          formPricingExtra={formPricingExtra}
+          setFormPricingExtra={setFormPricingExtra}
+          formInvestmentExtra={formInvestmentExtra}
+          setFormInvestmentExtra={setFormInvestmentExtra}
+          formDocuments={formDocuments}
+          setFormDocuments={setFormDocuments}
+          formVideosExtra={formVideosExtra}
+          setFormVideosExtra={setFormVideosExtra}
+          formAgentExtra={formAgentExtra}
+          setFormAgentExtra={setFormAgentExtra}
+          formReviews={formReviews}
+          setFormReviews={setFormReviews}
+          formFaqs={formFaqs}
+          setFormFaqs={setFormFaqs}
+          formSeo={formSeo}
+          setFormSeo={setFormSeo}
+          formAppearance={formAppearance}
+          setFormAppearance={setFormAppearance}
+        />
       )}
 
       {/* TAB D: TRASH AND DELETION ARCHIVES */}

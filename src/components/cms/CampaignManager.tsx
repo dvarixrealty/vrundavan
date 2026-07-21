@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { CampaignService, SiteCMSConfig, CampaignButtonSettings, CampaignFormFieldsConfig } from '../../types';
 import { firebaseService } from '../../lib/firebaseService';
+import MediaPicker from '../MediaPicker';
 
 interface CampaignManagerProps {
   siteSettings?: SiteCMSConfig;
@@ -192,10 +193,15 @@ export function InnerCampaignManager({ siteSettings, setSiteSettings }: Campaign
 
   // Filter campaigns
   const filteredCampaigns = useMemo(() => {
+    const query = (searchQuery || '').toLowerCase();
     return campaigns.filter(c => {
-      const matchSearch = c.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          c.badge.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          c.shortDescription.toLowerCase().includes(searchQuery.toLowerCase());
+      const titleStr = (c.title || '').toLowerCase();
+      const badgeStr = (c.badge || '').toLowerCase();
+      const descStr = (c.shortDescription || '').toLowerCase();
+      
+      const matchSearch = titleStr.includes(query) || 
+                          badgeStr.includes(query) || 
+                          descStr.includes(query);
       const matchCategory = filterCategory === 'All' || c.category === filterCategory;
       const matchStatus = filterStatus === 'All' || c.status === filterStatus;
       return matchSearch && matchCategory && matchStatus;
@@ -373,7 +379,48 @@ export function InnerCampaignManager({ siteSettings, setSiteSettings }: Campaign
     setIsEditorOpen(true);
   };
 
-  // Cover Image upload drag handlers
+  // Cover Image upload drag handlers and image validator
+  const [imageWarning, setImageWarning] = useState<string | null>(null);
+
+  const processCampaignFile = (file: File) => {
+    setImageWarning(null);
+
+    // Validate format
+    const allowedFormats = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedFormats.includes(file.type)) {
+      setImageWarning('❌ Unsupported format. Please use JPG, PNG or WEBP.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onloadend = () => {
+      const img = new Image();
+      img.onload = () => {
+        const aspect = img.width / img.height;
+        const targetAspect = 16 / 9;
+        const isNot16_9 = Math.abs(aspect - targetAspect) > 0.15;
+        const isTooSmall = img.width < 1200 || img.height < 675;
+
+        let warning = '';
+        if (file.size > 1 * 1024 * 1024) {
+          warning += '⚠️ File size is larger than 1MB (Recommended max: 1MB). ';
+        }
+        if (isNot16_9) {
+          warning += '⚠️ Aspect ratio deviates from recommended 16:9. ';
+        }
+        if (isTooSmall) {
+          warning += '⚠️ Small size (under 1200x675 px, Recommended: 1600x900 px). ';
+        }
+        if (warning) {
+          setImageWarning(warning);
+        }
+      };
+      img.src = reader.result as string;
+      setEditingCampaign(prev => prev ? { ...prev, image: reader.result as string } : null);
+    };
+  };
+
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -389,23 +436,13 @@ export function InnerCampaignManager({ siteSettings, setSiteSettings }: Campaign
     e.stopPropagation();
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onloadend = () => {
-        setEditingCampaign(prev => prev ? { ...prev, image: reader.result as string } : null);
-      };
+      processCampaignFile(e.dataTransfer.files[0]);
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onloadend = () => {
-        setEditingCampaign(prev => prev ? { ...prev, image: reader.result as string } : null);
-      };
+      processCampaignFile(e.target.files[0]);
     }
   };
 
@@ -492,7 +529,7 @@ export function InnerCampaignManager({ siteSettings, setSiteSettings }: Campaign
             return (
               <div 
                 key={campaign.id} 
-                className="bg-white border border-slate-200 rounded-2xl overflow-hidden hover:shadow-md transition-all duration-300 flex flex-col group relative"
+                className="bg-white border border-slate-200 rounded-2xl overflow-hidden hover:shadow-xl hover:border-slate-300 transition-all duration-300 flex flex-col group relative"
               >
                 {/* Visual Status Indicator Badge */}
                 <div className="absolute top-3 right-3 z-10 flex gap-1.5 flex-wrap justify-end max-w-[70%]">
@@ -524,7 +561,7 @@ export function InnerCampaignManager({ siteSettings, setSiteSettings }: Campaign
                   <img 
                     src={campaign.image} 
                     alt={campaign.title} 
-                    className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-500"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     referrerPolicy="no-referrer"
                   />
                   <div className="absolute bottom-3 left-3 flex gap-1 items-center">
@@ -874,61 +911,16 @@ export function InnerCampaignManager({ siteSettings, setSiteSettings }: Campaign
                     />
                   </div>
 
-                  {/* Cover Image URL / Drag-and-Drop */}
+                  {/* Cover Image URL / Media Library */}
                   <div className="space-y-1">
-                    <label className="text-[10px] font-extrabold uppercase text-slate-450">Featured Cover Image</label>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Drag and Drop Zone */}
-                      <div
-                        onDragEnter={handleDrag}
-                        onDragOver={handleDrag}
-                        onDragLeave={handleDrag}
-                        onDrop={handleDrop}
-                        onClick={() => fileInputRef.current?.click()}
-                        className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
-                          dragActive ? 'border-[#ff5a3c] bg-[#ff5a3c]/5' : 'border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept="image/*"
-                          onChange={handleFileSelect}
-                          className="hidden"
-                        />
-                        <Upload className="h-6 w-6 text-slate-400 mx-auto mb-1" />
-                        <p className="text-[11px] text-slate-600">Drag image here or click to select</p>
-                        <p className="text-[9px] text-slate-400">Supported: PNG, JPG (base64 saved)</p>
-                      </div>
-
-                      {/* Manual Image URL field */}
-                      <div className="space-y-3">
-                        <input
-                          type="text"
-                          value={editingCampaign.image || ''}
-                          onChange={(e) => setEditingCampaign(prev => prev ? { ...prev, image: e.target.value } : null)}
-                          placeholder="Paste illustrative cover Unsplash image URL..."
-                          className="w-full border border-slate-200 p-2 rounded-lg text-[10px] font-mono text-slate-600 focus:outline-none"
-                        />
-                        {editingCampaign.image && (
-                          <div className="h-16 rounded-lg overflow-hidden border border-slate-100 bg-slate-50 relative">
-                            <img 
-                              src={editingCampaign.image} 
-                              alt="Cover Preview" 
-                              className="w-full h-full object-cover" 
-                              referrerPolicy="no-referrer"
-                            />
-                            <button
-                              onClick={() => setEditingCampaign(prev => prev ? { ...prev, image: '' } : null)}
-                              className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white hover:bg-black/80 transition"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <MediaPicker
+                      label="Featured Cover Image"
+                      value={editingCampaign.image || ""}
+                      onChange={(url) => setEditingCampaign(prev => prev ? { ...prev, image: url } : null)}
+                      folder="campaigns"
+                      category="Campaigns"
+                      helperText="Recommended Layout Sizing: Campaign Banner (1600 × 900 px), Campaign Thumbnail (800 × 450 px), Mobile Banner (800 × 450 px). High-quality 16:9 aspect ratios are automatically cropped and composited."
+                    />
                   </div>
 
                   {/* Status & Scheduling */}

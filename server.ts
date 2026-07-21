@@ -1,37 +1,240 @@
 import express from "express";
 import path from "path";
 import cors from "cors";
-import { initializeApp } from "firebase/app";
-import { 
-  getFirestore, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  deleteDoc, 
-  collection 
-} from "firebase/firestore";
+import fs from "fs";
+import multer from "multer";
+import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
+import { testMySQLConnection, getPool } from "./src/lib/mysqlService.ts";
+import { 
+  initializePropertiesTable, 
+  getPropertiesFromMySQL, 
+  savePropertyToMySQL, 
+  deletePropertyFromMySQL, 
+  migrateProperties 
+} from "./src/lib/mysqlPropertiesService.ts";
+import {
+  initializePhase5Tables,
+  migratePropertyImagesAndAmenities,
+  migrateAgentsToMySQL,
+  migrateInquiriesToMySQL,
+  migrateCentralEnquiriesToMySQL
+} from "./src/lib/mysqlPhase5Service.ts";
+import {
+  initializePhase6Tables,
+  migrateCategories,
+  migrateSearchCategories,
+  migrateSeoConfigs,
+  migratePropertySeoConfigs,
+  migrateSeoRedirectRules,
+  migrateSiteCmsConfig,
+  migrateHeroBanners,
+  migrateFaqs,
+  migrateQuickFilters,
+  migrateRoutingRules,
+  migrateSettings,
+  migrateThemePresets
+} from "./src/lib/mysqlPhase6Service.ts";
+import { SAMPLE_REDIRECTS } from "./src/data/seoTestData.ts";
+import {
+  initializePhase7Tables,
+  mysqlPhase7Service
+} from "./src/lib/mysqlPhase7Service.ts";
+import {
+  initializeCmsTables,
+  mysqlCmsService
+} from "./src/lib/mysqlCmsService.ts";
+import {
+  initializeMediaTable,
+  getMediaItems,
+  saveMediaItem,
+  updateMediaItemMetadata,
+  deleteMediaItem,
+  findUsageOfImage,
+  renameMediaAsset
+} from "./src/lib/mysqlMediaService.ts";
+
+function getPublicBaseUrl(req?: any): string {
+  // 1. If we have an active request, use its host dynamically to determine the current public origin
+  if (req) {
+    const host = req.headers["x-forwarded-host"] || req.headers.host;
+    const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+    // Check that we don't accidentally return localhost:3000 if accessed from outside
+    if (host && !host.includes("localhost:3000")) {
+      return `${proto}://${host}`;
+    }
+  }
+
+  // 2. Fallback to APP_URL if set and does not contain localhost
+  if (process.env.APP_URL && !process.env.APP_URL.includes("localhost")) {
+    return process.env.APP_URL.replace(/\/$/, "");
+  }
+
+  // 3. Fallback to PUBLIC_BASE_URL if set and does not contain localhost
+  if (process.env.PUBLIC_BASE_URL && !process.env.PUBLIC_BASE_URL.includes("localhost")) {
+    return process.env.PUBLIC_BASE_URL.replace(/\/$/, "");
+  }
+
+  // 4. Return relative path base by default to ensure perfect local/mismatch resilience
+  return "";
+}
+
+function sanitizeFolder(folderPath: string | null | undefined): string {
+  if (!folderPath) return "properties";
+  const clean = folderPath
+    .replace(/\.\./g, "")
+    .replace(/[^\w\-\/]/g, "")
+    .replace(/^\/|\/$/g, "");
+  return clean || "properties";
+}
+
+function normalizeMediaItemUrls(item: any, req?: any): any {
+  if (!item) return item;
+  const baseUrl = getPublicBaseUrl(req);
+  
+  // Extract relative path
+  let relPath = item.relative_path;
+  if (!relPath && item.storage_path) {
+    relPath = "/" + item.storage_path;
+  }
+  if (!relPath && item.public_url) {
+    const match = item.public_url.match(/(\/uploads\/.*)$/);
+    if (match) {
+      relPath = match[1];
+    } else if (item.public_url.startsWith("/")) {
+      relPath = item.public_url;
+    }
+  }
+  if (!relPath) {
+    relPath = "/uploads/" + (item.folder || "properties") + "/" + (item.seo_filename || item.stored_filename || item.slug || item.id);
+  }
+  
+  if (relPath && !relPath.startsWith("/")) {
+    relPath = "/" + relPath;
+  }
+
+  // Ensure Public URL points to the actual physical file that exists on disk.
+  // If optimization converts PNG/JPG into WebP, we reference the optimized WebP asset.
+  if (relPath) {
+    const originalFullPath = path.join(process.cwd(), relPath);
+    if (!fs.existsSync(originalFullPath)) {
+      const ext = path.extname(relPath);
+      if (ext && ext.toLowerCase() !== ".webp") {
+        const webpRelPath = relPath.substring(0, relPath.lastIndexOf(ext)) + ".webp";
+        const webpFullPath = path.join(process.cwd(), webpRelPath);
+        if (fs.existsSync(webpFullPath)) {
+          relPath = webpRelPath;
+        }
+      }
+    }
+  }
+  
+  const constructUrl = (originalUrl: string | null, suffix: string = "") => {
+    if (!originalUrl) return null;
+    let subRelPath = "";
+    const match = originalUrl.match(/(\/uploads\/.*)$/);
+    if (match) {
+      subRelPath = match[1];
+    } else if (originalUrl.startsWith("/")) {
+      subRelPath = originalUrl;
+    } else {
+      const lastDot = (item.seo_filename || "").lastIndexOf(".");
+      const ext = lastDot !== -1 ? (item.seo_filename || "").substring(lastDot) : ".webp";
+      subRelPath = `/uploads/${item.folder || "properties"}/${item.slug || "image"}${suffix}${ext}`;
+    }
+    if (subRelPath && !subRelPath.startsWith("/")) {
+      subRelPath = "/" + subRelPath;
+    }
+
+    // Check physical existence for responsive sizes too
+    const subFullPath = path.join(process.cwd(), subRelPath);
+    if (!fs.existsSync(subFullPath)) {
+      const ext = path.extname(subRelPath);
+      if (ext && ext.toLowerCase() !== ".webp") {
+        const webpSubRelPath = subRelPath.substring(0, subRelPath.lastIndexOf(ext)) + ".webp";
+        const webpSubFullPath = path.join(process.cwd(), webpSubRelPath);
+        if (fs.existsSync(webpSubFullPath)) {
+          subRelPath = webpSubRelPath;
+        }
+      }
+    }
+
+    return baseUrl + subRelPath;
+  };
+  
+  return {
+    ...item,
+    relative_path: relPath,
+    public_url: baseUrl + relPath,
+    thumbnail_url: constructUrl(item.thumbnail_url, "-thumb") || (baseUrl + relPath),
+    medium_url: constructUrl(item.medium_url, "-medium") || (baseUrl + relPath),
+    large_url: constructUrl(item.large_url, "-large") || (baseUrl + relPath),
+    original_url: baseUrl + relPath
+  };
+}
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
 app.use(express.json());
 app.use(cors());
 
-// Web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyDwl9YfSeICMJBKnngNT-iWKij-Ucy3wmg",
-  authDomain: "dvarix--realty.firebaseapp.com",
-  projectId: "dvarix--realty",
-  storageBucket: "dvarix--realty.firebasestorage.app",
-  messagingSenderId: "94353466975",
-  appId: "1:94353466975:web:b958d5aea99b38ff3dddea",
-  measurementId: "G-V38ZNLBXT9"
-};
+// Mount local static serving route for uploaded assets
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp);
+// --- SERVER-SIDE MEMORY CACHING SYSTEM ---
+// Added to prevent exceeding Hostinger's max_connections_per_hour (500 limit)
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+}
+const serverCache: Record<string, CacheEntry> = {};
+const CACHE_TTL = 30000; // 30 seconds Cache Time-to-Live
+
+app.use((req, res, next) => {
+  const path = req.path;
+  const method = req.method;
+
+  // We only cache GET requests under /api/mysql/ and /api/chatbot/
+  if (method === "GET" && (path.startsWith("/api/mysql/") || path.startsWith("/api/chatbot/"))) {
+    const cacheKey = req.originalUrl;
+    const cached = serverCache[cacheKey];
+    
+    if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
+      res.setHeader("X-Server-Cache", "HIT");
+      return res.json(cached.data);
+    }
+
+    // Intercept res.json to store the response in our cache
+    const originalJson = res.json;
+    res.json = function (body: any) {
+      if (res.statusCode === 200 && body && body.success !== false) {
+        serverCache[cacheKey] = {
+          data: body,
+          timestamp: Date.now()
+        };
+      }
+      return originalJson.call(this, body);
+    };
+  } else if ((method === "POST" || method === "PUT" || method === "DELETE" || method === "PATCH") && path.startsWith("/api/")) {
+    // Invalidate the cache for this path and any parent/child paths
+    const reqBasePath = path.split("?")[0];
+    
+    Object.keys(serverCache).forEach((cachedUrl) => {
+      const cachedBasePath = cachedUrl.split("?")[0];
+      if (
+        cachedBasePath === reqBasePath ||
+        reqBasePath.startsWith(cachedBasePath) ||
+        cachedBasePath.startsWith(reqBasePath)
+      ) {
+        delete serverCache[cachedUrl];
+      }
+    });
+  }
+  next();
+});
+
+// Google Gemini Client Lazy Initializer
 
 let aiClient: GoogleGenAI | null = null;
 function getGemini(): GoogleGenAI {
@@ -49,12 +252,45 @@ function getGemini(): GoogleGenAI {
   return aiClient;
 }
 
+async function getChatbotSetting(key: string, defaultValue: any): Promise<any> {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT value FROM settings WHERE key_name = ?", [key]);
+    if (rows && rows.length > 0) {
+      return JSON.parse(rows[0].value);
+    }
+  } catch (err) {
+    console.warn(`Could not read chatbot setting ${key} from MySQL:`, err);
+  }
+  return defaultValue;
+}
+
+async function saveChatbotSetting(key: string, value: any): Promise<boolean> {
+  try {
+    const pool = getPool();
+    const q = `
+      INSERT INTO settings (key_name, value)
+      VALUES (?, ?)
+      ON DUPLICATE KEY UPDATE
+        value = VALUES(value),
+        updated_at = CURRENT_TIMESTAMP;
+    `;
+    await pool.query(q, [key, JSON.stringify(value)]);
+    return true;
+  } catch (err) {
+    console.error(`Could not write chatbot setting ${key} to MySQL:`, err);
+    return false;
+  }
+}
+
 // Helper to save audit trace logs from endpoints
 async function logAuditOnServer(action: string, module: string, operator: string, oldVal: any, newVal: any) {
   try {
     const logId = 'audit-srv-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
     const logData = {
       id: logId,
+      session_id: 'session-srv',
+      visitor_id: 'visitor-srv',
       user_id: operator || 'server-worker@dvarix.com',
       user_name: 'Dvarix Server Agent',
       role: 'Bot Administrator / Server',
@@ -64,7 +300,7 @@ async function logAuditOnServer(action: string, module: string, operator: string
       previousValues: oldVal ? JSON.stringify(oldVal) : 'None',
       updatedValues: newVal ? JSON.stringify(newVal) : 'None'
     };
-    await setDoc(doc(db, 'chatbot_audit_logs', logId), logData);
+    await mysqlPhase7Service.saveChatbotAuditLog(logData);
   } catch (err) {
     console.error("Failed to write audit log from server:", err);
   }
@@ -81,13 +317,13 @@ app.post("/api/chatbot/save-faq", async (req, res) => {
     const faqId = id || 'kb-faq-' + Date.now();
     const isNew = !id;
     
-    const docRef = doc(db, 'chatbot_knowledge', faqId);
     let version = 1;
     let oldVal = null;
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      oldVal = docSnap.data();
-      version = (oldVal.version || 1) + 1;
+    const faqs = await mysqlPhase7Service.getChatbotKnowledge();
+    const oldValItem = faqs.find((f: any) => f.id === faqId);
+    if (oldValItem) {
+      oldVal = oldValItem;
+      version = (oldValItem.version || 1) + 1;
     }
 
     const record = {
@@ -103,7 +339,7 @@ app.post("/api/chatbot/save-faq", async (req, res) => {
       updatedBy: operator || 'Dvarix Administrator'
     };
 
-    await setDoc(docRef, record);
+    await mysqlPhase7Service.saveChatbotKnowledge(record);
     await logAuditOnServer(isNew ? 'Create' : 'Edit', 'Knowledge FAQ Base', operator, oldVal, record);
     
     res.json({ success: true, message: "Manual FAQ saved and indexed successfully.", data: record });
@@ -120,14 +356,10 @@ app.post("/api/chatbot/delete-faq", async (req, res) => {
       return res.status(400).json({ success: false, error: "FAQ ID parameter is required." });
     }
 
-    const docRef = doc(db, 'chatbot_knowledge', id);
-    const snap = await getDoc(docRef);
-    let oldVal = null;
-    if (snap.exists()) {
-      oldVal = snap.data();
-    }
+    const faqs = await mysqlPhase7Service.getChatbotKnowledge();
+    const oldVal = faqs.find((f: any) => f.id === id) || null;
 
-    await deleteDoc(docRef);
+    await mysqlPhase7Service.deleteChatbotKnowledge(id);
     await logAuditOnServer('Delete', 'Knowledge FAQ Base', operator, oldVal, null);
 
     res.json({ success: true, message: "Manual FAQ deleted and removed from index." });
@@ -173,7 +405,7 @@ Document Content: "${content}"`;
       dateAdded: new Date().toISOString()
     };
 
-    await setDoc(doc(db, 'chatbot_documents', docId), record);
+    await mysqlPhase7Service.saveChatbotDocument(record);
     await logAuditOnServer('Create', 'Document Upload KB', operator, null, record);
 
     res.json({ success: true, message: "Document Ingested & Extrapolated with Server AI successfully.", data: record });
@@ -188,12 +420,10 @@ app.post("/api/chatbot/delete-document", async (req, res) => {
     const { id, operator } = req.body;
     if (!id) return res.status(400).json({ success: false, error: "ID is required." });
 
-    const docRef = doc(db, 'chatbot_documents', id);
-    const snap = await getDoc(docRef);
-    let oldVal = null;
-    if (snap.exists()) oldVal = snap.data();
+    const docs = await mysqlPhase7Service.getChatbotDocuments();
+    const oldVal = docs.find((d: any) => d.id === id) || null;
 
-    await deleteDoc(docRef);
+    await mysqlPhase7Service.deleteChatbotDocument(id);
     await logAuditOnServer('Delete', 'Document Upload KB', operator, oldVal, null);
 
     res.json({ success: true, message: "Document stripped from Vector memory." });
@@ -238,7 +468,7 @@ Crawled text: "${content}"`;
       dateAdded: new Date().toISOString()
     };
 
-    await setDoc(doc(db, 'chatbot_websites', siteId), record);
+    await mysqlPhase7Service.saveChatbotWebsite(record);
     await logAuditOnServer('Create', 'Website Crawler Link KB', operator, null, record);
 
     res.json({ success: true, message: "Webpage synced, parsed, and cached in index memory successfully.", data: record });
@@ -253,12 +483,10 @@ app.post("/api/chatbot/delete-website", async (req, res) => {
     const { id, operator } = req.body;
     if (!id) return res.status(400).json({ success: false, error: "ID is required." });
 
-    const docRef = doc(db, 'chatbot_websites', id);
-    const snap = await getDoc(docRef);
-    let oldVal = null;
-    if (snap.exists()) oldVal = snap.data();
+    const webs = await mysqlPhase7Service.getChatbotWebsites();
+    const oldVal = webs.find((w: any) => w.id === id) || null;
 
-    await deleteDoc(docRef);
+    await mysqlPhase7Service.deleteChatbotWebsite(id);
     await logAuditOnServer('Delete', 'Website Crawler Link KB', operator, oldVal, null);
 
     res.json({ success: true, message: "Website removed from memory." });
@@ -284,7 +512,7 @@ app.post("/api/chatbot/save-snippet", async (req, res) => {
       dateAdded: new Date().toISOString()
     };
 
-    await setDoc(doc(db, 'chatbot_snippets', snId), record);
+    await mysqlPhase7Service.saveChatbotSnippet(record);
     await logAuditOnServer('Create', 'AI Note Snippet KB', operator, null, record);
 
     res.json({ success: true, message: "Snippet instruction note saved and is now live active.", data: record });
@@ -299,12 +527,10 @@ app.post("/api/chatbot/delete-snippet", async (req, res) => {
     const { id, operator } = req.body;
     if (!id) return res.status(400).json({ success: false, error: "ID is required." });
 
-    const docRef = doc(db, 'chatbot_snippets', id);
-    const snap = await getDoc(docRef);
-    let oldVal = null;
-    if (snap.exists()) oldVal = snap.data();
+    const snips = await mysqlPhase7Service.getChatbotSnippets();
+    const oldVal = snips.find((s: any) => s.id === id) || null;
 
-    await deleteDoc(docRef);
+    await mysqlPhase7Service.deleteChatbotSnippet(id);
     await logAuditOnServer('Delete', 'AI Note Snippet KB', operator, oldVal, null);
 
     res.json({ success: true, message: "Instruction note deleted." });
@@ -316,16 +542,10 @@ app.post("/api/chatbot/delete-snippet", async (req, res) => {
 // 9. DYNAMIC PROPERTY DATABASE INTEGRATION SYNC ACTION
 app.post("/api/chatbot/sync-properties", async (req, res) => {
   try {
-    const propCol = collection(db, 'properties');
-    const querySnap = await getDocs(propCol);
-    const propertiesList: any[] = [];
-    querySnap.forEach((doc) => {
-      propertiesList.push({ id: doc.id, ...doc.data() });
-    });
-
+    const propertiesList = await getPropertiesFromMySQL();
     const listCount = propertiesList.length;
 
-    await setDoc(doc(db, 'chatbot_settings', 'properties_cache'), {
+    await saveChatbotSetting('chatbot_properties_cache', {
       syncedAt: new Date().toISOString(),
       propertiesCount: listCount,
       summaryList: propertiesList.map(p => ({
@@ -350,6 +570,918 @@ app.post("/api/chatbot/sync-properties", async (req, res) => {
   }
 });
 
+// MySQL Properties Migration & API Integration (Phase 4)
+app.get("/api/mysql/properties", async (req, res) => {
+  try {
+    const list = await getPropertiesFromMySQL();
+    res.json({ success: true, count: list.length, properties: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/mysql/properties", async (req, res) => {
+  try {
+    const property = req.body;
+    if (!property || !property.id) {
+      return res.status(400).json({ success: false, error: "Property object with a valid 'id' is required." });
+    }
+    const success = await savePropertyToMySQL(property);
+    if (success) {
+      res.json({ success: true, message: `Property ${property.id} saved to MySQL successfully.` });
+    } else {
+      res.status(500).json({ success: false, error: "Failed to save property to MySQL." });
+    }
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete("/api/mysql/properties/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const success = await deletePropertyFromMySQL(id);
+    if (success) {
+      res.json({ success: true, message: `Property ${id} deleted from MySQL successfully.` });
+    } else {
+      res.status(500).json({ success: false, error: "Failed to delete property from MySQL." });
+    }
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/mysql/migrate/properties", async (req, res) => {
+  res.json({ 
+    success: true, 
+    message: "Bulk properties migration historical API: already completed, verified, and promoted to primary Hostinger MySQL." 
+  });
+});
+
+app.post("/api/mysql/migrate/phase5", async (req, res) => {
+  res.json({
+    success: true,
+    message: "Phase 5 migration historical API: already completed, verified, and promoted to primary Hostinger MySQL."
+  });
+});
+
+app.post("/api/mysql/migrate/phase6", async (req, res) => {
+  res.json({
+    success: true,
+    message: "Phase 6 migration historical API: already completed, verified, and promoted to primary Hostinger MySQL."
+  });
+});
+
+// ==========================================
+// Phase 7 MySQL Operational Modules CRUD APIs & Migration
+// ==========================================
+
+// Site Visits
+app.get("/api/mysql/site_visits", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getSiteVisits();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/site_visits", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveSiteVisit(payload);
+    res.json({ success: true, message: "Site visit saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/site_visits/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteSiteVisit(id);
+    res.json({ success: true, message: "Site visit deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Requirements
+app.get("/api/mysql/requirements", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getRequirements();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/requirements", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveRequirement(payload);
+    res.json({ success: true, message: "Requirement saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/requirements/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteRequirement(id);
+    res.json({ success: true, message: "Requirement deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Customer Requirements
+app.get("/api/mysql/customer_requirements", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getCustomerRequirements();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/customer_requirements", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveCustomerRequirement(payload);
+    res.json({ success: true, message: "Customer requirement saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/customer_requirements/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteCustomerRequirement(id);
+    res.json({ success: true, message: "Customer requirement deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Finance Entries
+app.get("/api/mysql/finance_entries", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getFinanceEntries();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/finance_entries", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveFinanceEntry(payload);
+    res.json({ success: true, message: "Finance entry saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/finance_entries/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteFinanceEntry(id);
+    res.json({ success: true, message: "Finance entry deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// CRM Documents
+app.get("/api/mysql/crm_documents", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getDocuments();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/crm_documents", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveDocument(payload);
+    res.json({ success: true, message: "CRM document saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/crm_documents/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteDocument(id);
+    res.json({ success: true, message: "CRM document deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Chatbot Knowledge
+app.get("/api/mysql/chatbot_knowledge", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getChatbotKnowledge();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/chatbot_knowledge", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveChatbotKnowledge(payload);
+    res.json({ success: true, message: "Chatbot knowledge saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/chatbot_knowledge/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteChatbotKnowledge(id);
+    res.json({ success: true, message: "Chatbot knowledge deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Chatbot Documents
+app.get("/api/mysql/chatbot_documents", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getChatbotDocuments();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/chatbot_documents", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveChatbotDocument(payload);
+    res.json({ success: true, message: "Chatbot document saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/chatbot_documents/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteChatbotDocument(id);
+    res.json({ success: true, message: "Chatbot document deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Chatbot Websites
+app.get("/api/mysql/chatbot_websites", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getChatbotWebsites();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/chatbot_websites", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveChatbotWebsite(payload);
+    res.json({ success: true, message: "Chatbot website saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/chatbot_websites/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteChatbotWebsite(id);
+    res.json({ success: true, message: "Chatbot website deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Chatbot Snippets
+app.get("/api/mysql/chatbot_snippets", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getChatbotSnippets();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/chatbot_snippets", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveChatbotSnippet(payload);
+    res.json({ success: true, message: "Chatbot snippet saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/chatbot_snippets/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteChatbotSnippet(id);
+    res.json({ success: true, message: "Chatbot snippet deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Chatbot Flows
+app.get("/api/mysql/chatbot_flows", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getChatbotFlows();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/chatbot_flows", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveChatbotFlow(payload);
+    res.json({ success: true, message: "Chatbot flow saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/chatbot_flows/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteChatbotFlow(id);
+    res.json({ success: true, message: "Chatbot flow deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Qualification Rules
+app.get("/api/mysql/qualification_rules", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getQualificationRules();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/qualification_rules", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveQualificationRule(payload);
+    res.json({ success: true, message: "Qualification rule saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/qualification_rules/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteQualificationRule(id);
+    res.json({ success: true, message: "Qualification rule deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Chatbot Audit Logs
+app.get("/api/mysql/chatbot_audit_logs", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getChatbotAuditLogs();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/chatbot_audit_logs", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveChatbotAuditLog(payload);
+    res.json({ success: true, message: "Chatbot audit log saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/chatbot_audit_logs/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteChatbotAuditLog(id);
+    res.json({ success: true, message: "Chatbot audit log deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// AI Permissions
+app.get("/api/mysql/ai_permissions", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getAiPermissions();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/ai_permissions", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveAiPermission(payload);
+    res.json({ success: true, message: "AI permission saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/ai_permissions/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteAiPermission(id);
+    res.json({ success: true, message: "AI permission deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// AI Activity Logs
+app.get("/api/mysql/ai_activity_logs", async (req, res) => {
+  try {
+    const list = await mysqlPhase7Service.getAiActivityLogs();
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/ai_activity_logs", async (req, res) => {
+  try {
+    const payload = req.body;
+    await mysqlPhase7Service.saveAiActivityLog(payload);
+    res.json({ success: true, message: "AI activity log saved to MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/ai_activity_logs/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await mysqlPhase7Service.deleteAiActivityLog(id);
+    res.json({ success: true, message: "AI activity log deleted from MySQL successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==========================================
+// Phase 8 MySQL CMS Operational CRUD REST APIs
+// ==========================================
+
+// Categories
+app.get("/api/mysql/categories", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getCategories();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/categories", async (req, res) => {
+  try {
+    await mysqlCmsService.saveCategory(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/categories/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteCategory(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Search Categories
+app.get("/api/mysql/search_categories", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getSearchCategories();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/search_categories", async (req, res) => {
+  try {
+    await mysqlCmsService.saveSearchCategory(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/search_categories/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteSearchCategory(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Agents
+app.get("/api/mysql/agents", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getAgents();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/agents", async (req, res) => {
+  try {
+    await mysqlCmsService.saveAgent(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/agents/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteAgent(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Inquiries
+app.get("/api/mysql/inquiries", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getInquiries();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/inquiries", async (req, res) => {
+  try {
+    await mysqlCmsService.saveInquiry(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/inquiries/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteInquiry(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Central Enquiries
+app.get("/api/mysql/central_enquiries", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getCentralEnquiries();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/central_enquiries", async (req, res) => {
+  try {
+    await mysqlCmsService.saveCentralEnquiry(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/central_enquiries/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteCentralEnquiry(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// SEO Configs
+app.get("/api/mysql/seo_configs", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getSeoConfigs();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/seo_configs", async (req, res) => {
+  try {
+    await mysqlCmsService.saveSeoConfig(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/seo_configs/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteSeoConfig(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Property SEO Configs
+app.get("/api/mysql/property_seo_configs", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getPropertySeoConfigs();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/property_seo_configs", async (req, res) => {
+  try {
+    await mysqlCmsService.savePropertySeoConfig(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/property_seo_configs/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deletePropertySeoConfig(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// SEO Redirect Rules
+app.get("/api/mysql/seo_redirect_rules", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getSeoRedirectRules();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/seo_redirect_rules", async (req, res) => {
+  try {
+    await mysqlCmsService.saveSeoRedirectRule(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/seo_redirect_rules/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteSeoRedirectRule(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Site CMS Config
+app.get("/api/mysql/site_cms_config", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getSiteCmsConfig();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/site_cms_config", async (req, res) => {
+  try {
+    await mysqlCmsService.saveSiteCmsConfig(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/site_cms_config/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteSiteCmsConfig(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Hero Banners
+app.get("/api/mysql/hero_banners", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getHeroBanners();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/hero_banners", async (req, res) => {
+  try {
+    await mysqlCmsService.saveHeroBanner(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/hero_banners/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteHeroBanner(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// FAQs
+app.get("/api/mysql/faqs", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getFaqs();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/faqs", async (req, res) => {
+  try {
+    await mysqlCmsService.saveFaq(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/faqs/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteFaq(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Quick Filters
+app.get("/api/mysql/quick_filters", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getQuickFilters();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/quick_filters", async (req, res) => {
+  try {
+    await mysqlCmsService.saveQuickFilter(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/quick_filters/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteQuickFilter(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Routing Rules
+app.get("/api/mysql/routing_rules", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getRoutingRules();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/routing_rules", async (req, res) => {
+  try {
+    await mysqlCmsService.saveRoutingRule(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/routing_rules/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteRoutingRule(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Settings (generic settings)
+app.get("/api/mysql/settings", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getSettings();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/settings/:key", async (req, res) => {
+  try {
+    await mysqlCmsService.saveSetting(req.params.key, req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/settings/:key", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteSetting(req.params.key);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Theme Presets
+app.get("/api/mysql/theme_presets", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getThemePresets();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/theme_presets", async (req, res) => {
+  try {
+    await mysqlCmsService.saveThemePreset(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/theme_presets/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteThemePreset(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Map Locations
+app.get("/api/mysql/map_locations", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getMapLocations();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/map_locations", async (req, res) => {
+  try {
+    await mysqlCmsService.saveMapLocation(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/map_locations/:name", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteMapLocation(req.params.name);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin Users
+app.get("/api/mysql/admin_users", async (req, res) => {
+  try {
+    const data = await mysqlCmsService.getAdminUsers();
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/mysql/admin_users", async (req, res) => {
+  try {
+    await mysqlCmsService.saveAdminUser(req.body);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.delete("/api/mysql/admin_users/:id", async (req, res) => {
+  try {
+    await mysqlCmsService.deleteAdminUser(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Migration endpoint for Phase 7
+app.post("/api/mysql/migrate/phase7", async (req, res) => {
+  res.json({
+    success: true,
+    message: "Phase 7 migration historical API: already completed, verified, and promoted to primary Hostinger MySQL."
+  });
+});
+
 // 10. DYNAMIC PROGRAMMATIC ROUTING AND ADVANCED CRM SYNC LEAD RULES
 app.post("/api/chatbot/crm-sync-actions", async (req, res) => {
   try {
@@ -358,13 +1490,8 @@ app.post("/api/chatbot/crm-sync-actions", async (req, res) => {
       return res.status(400).json({ success: false, error: "leadPayload parameter is required." });
     }
 
-    const rulesCol = collection(db, 'qualification_rules');
-    const rulesSnap = await getDocs(rulesCol);
-    const activeRules: any[] = [];
-    rulesSnap.forEach(d => {
-      const data = d.data();
-      if (data.status === 'Active') activeRules.push(data);
-    });
+    const rules = await mysqlPhase7Service.getQualificationRules();
+    const activeRules = rules.filter((r: any) => r.status === 'Active');
 
     let assignedAgent = 'General Coordinator';
     let matchedRuleName = 'Default Broadcast';
@@ -411,7 +1538,7 @@ app.post("/api/chatbot/crm-sync-actions", async (req, res) => {
       qualificationLogs: `Programmatic Match: Assigned under [${matchedRuleName}] rule to specialized desk [${assignedAgent}].`
     };
 
-    await setDoc(doc(db, 'requirements', leadPayload.id), resultLead);
+    await mysqlPhase7Service.saveRequirement(resultLead);
     await logAuditOnServer('Create/Route', 'Lead Qualifications Engine', 'CRM Automation Block', null, resultLead);
 
     res.json({
@@ -640,38 +1767,28 @@ app.post("/api/chatbot/trigger-entire-system-train", async (req, res) => {
     logs.push(`[${timestampFirst}] 🔍 [PIPELINE] Commencing exhaustive knowledge pipeline traversal for Dvarix Realty...`);
     
     // Fetch FAQs
-    const faqSnap = await getDocs(collection(db, 'chatbot_knowledge'));
-    const faqs: any[] = [];
-    faqSnap.forEach(d => faqs.push(d.data()));
+    const faqs = await mysqlPhase7Service.getChatbotKnowledge();
     logs.push(`[${new Date().toLocaleTimeString()}] 📚 [LOAD] Discovered ${faqs.length} Active Q&A overrides in local partition.`);
 
     // Fetch Documents
-    const docSnap = await getDocs(collection(db, 'chatbot_documents'));
-    const documents: any[] = [];
-    docSnap.forEach(d => documents.push(d.data()));
+    const documents = await mysqlPhase7Service.getChatbotDocuments();
     logs.push(`[${new Date().toLocaleTimeString()}] 📄 [LOAD] Ingested ${documents.length} PDF/TXT legal manual index blocks.`);
 
     // Fetch Websites
-    const siteSnap = await getDocs(collection(db, 'chatbot_websites'));
-    const websites: any[] = [];
-    siteSnap.forEach(d => websites.push(d.data()));
+    const websites = await mysqlPhase7Service.getChatbotWebsites();
     logs.push(`[${new Date().toLocaleTimeString()}] 🌐 [LOAD] Synced ${websites.length} domain crawls (/about, /services, /faq routes).`);
 
     // Fetch Property listings
-    const propSnap = await getDocs(collection(db, 'properties'));
-    const properties: any[] = [];
-    propSnap.forEach(d => properties.push(d.data()));
+    const properties = await getPropertiesFromMySQL();
     logs.push(`[${new Date().toLocaleTimeString()}] 🗄️ [LOAD] Scanned ${properties.length} live listings from main database.`);
 
     // Fetch Snippets
-    const snipSnap = await getDocs(collection(db, 'chatbot_snippets'));
-    const snippets: any[] = [];
-    snipSnap.forEach(d => snippets.push(d.data()));
+    const snippets = await mysqlPhase7Service.getChatbotSnippets();
     logs.push(`[${new Date().toLocaleTimeString()}] ✍️ [LOAD] Stacked ${snippets.length} specialized helper instruction overrides.`);
 
     logs.push(`[${new Date().toLocaleTimeString()}] ⚙️ [COMPILING] Auto-classifying documents, generating category-specific embeddings and preserving metadata...`);
 
-    // Fetch existing semantic indexes from Firestore to skip duplicates
+    // Fetch existing semantic indexes from MySQL settings to skip duplicates
     const indexDocNames = [
       'company_index', 'faq_index', 'property_index', 'legal_index',
       'vastu_index', 'website_index', 'crm_index', 'internal_index'
@@ -679,8 +1796,8 @@ app.post("/api/chatbot/trigger-entire-system-train", async (req, res) => {
     const oldIndexItemsMap: Record<string, any[]> = {};
     for (const name of indexDocNames) {
       try {
-        const snap = await getDoc(doc(db, 'chatbot_indexes', name));
-        oldIndexItemsMap[name] = snap.exists() ? (snap.data().items || []) : [];
+        const indexData = await getChatbotSetting('chatbot_index_' + name, null);
+        oldIndexItemsMap[name] = indexData ? (indexData.items || []) : [];
       } catch (err) {
         console.warn(`Could not load old index ${name}:`, err);
         oldIndexItemsMap[name] = [];
@@ -839,9 +1956,9 @@ app.post("/api/chatbot/trigger-entire-system-train", async (req, res) => {
       newIndexes[indexName].push(indexItem);
     }
 
-    // Save separate semantic vector indexes
+    // Save separate semantic vector indexes in MySQL
     for (const [name, items] of Object.entries(newIndexes)) {
-      await setDoc(doc(db, 'chatbot_indexes', name), {
+      await saveChatbotSetting('chatbot_index_' + name, {
         items,
         count: items.length,
         lastIndexed: new Date().toISOString()
@@ -868,15 +1985,16 @@ Consolidated Knowledge Profile: ${combinedCorpus.substring(0, 8000)}`;
       console.warn("Summary generation failed or bypassed:", aiErr.message);
     }
 
-    const compiledKnowledgeRef = doc(db, 'chatbot_settings', 'compiled_corpus');
-    await setDoc(compiledKnowledgeRef, {
+    await saveChatbotSetting('chatbot_settings_compiled_corpus', {
       compiledAt: new Date().toISOString(),
       rawCorpus: combinedCorpus,
       systemSummary: systemSummarizedRepresentation,
       status: 'Fully Trained'
     });
 
-    await setDoc(doc(db, 'chatbot_settings', 'config'), { intelligenceMode: true }, { merge: true });
+    const config = await getChatbotSetting('chatbot_settings_config', { intelligenceMode: false });
+    config.intelligenceMode = true;
+    await saveChatbotSetting('chatbot_settings_config', config);
 
     logs.push(`[${new Date().toLocaleTimeString()}] ⚡ [TRIGGERED_LIVE] Deploying compiled vector mappings. Intelligence Mode is ONLINE.`);
     logs.push(`[${new Date().toLocaleTimeString()}] 🎉 [SUCCESS] Training complete. Vector indexes successfully compiled and activated.`);
@@ -904,7 +2022,9 @@ Consolidated Knowledge Profile: ${combinedCorpus.substring(0, 8000)}`;
 app.post("/api/chatbot/toggle-intelligence", async (req, res) => {
   try {
     const { intelligenceMode, operator } = req.body;
-    await setDoc(doc(db, 'chatbot_settings', 'config'), { intelligenceMode: !!intelligenceMode }, { merge: true });
+    const config = await getChatbotSetting('chatbot_settings_config', { intelligenceMode: false });
+    config.intelligenceMode = !!intelligenceMode;
+    await saveChatbotSetting('chatbot_settings_config', config);
     await logAuditOnServer('Toggle Mode', 'Bot Cognitive Pipeline', operator, null, { intelligenceMode });
     res.json({ success: true, intelligenceMode: !!intelligenceMode, message: `Intelligence pipeline state: ${!!intelligenceMode ? 'ONLINE' : 'OFFLINE'}` });
   } catch (e: any) {
@@ -968,7 +2088,7 @@ Strictly format the JSON response so it fits a clean FAQ knowledge schema:
       updatedBy: 'Dvarix AI Synthesizer'
     };
 
-    await setDoc(doc(db, 'chatbot_knowledge', faqId), record);
+    await mysqlPhase7Service.saveChatbotKnowledge(record);
     await logAuditOnServer('Create', 'Grounded Database AI Synthesis', operator, null, record);
 
     res.json({ success: true, faq: record });
@@ -986,9 +2106,8 @@ app.post("/api/chatbot/chat", async (req, res) => {
       return res.status(400).json({ success: false, error: "Empty message payload." });
     }
 
-    // Load dynamic published personality configuration from Firestore
-    const configSnap = await getDoc(doc(db, 'chatbot_settings', 'config'));
-    const config = configSnap.exists() ? { ...DEFAULT_PERSONALITY, ...configSnap.data() } : DEFAULT_PERSONALITY;
+    // Load dynamic published personality configuration from MySQL settings
+    const config = await getChatbotSetting('chatbot_settings_config', DEFAULT_PERSONALITY);
 
     const previousTurns = (chatHistory || []).slice(-6).map((turn: any) => {
       const senderName = turn.sender === 'user' ? 'User' : (config.botName || 'Dvarix Assistant');
@@ -1004,9 +2123,9 @@ app.post("/api/chatbot/chat", async (req, res) => {
     // 3. Load items from routed semantic index
     let indexItems: any[] = [];
     try {
-      const indexSnap = await getDoc(doc(db, 'chatbot_indexes', indexName));
-      if (indexSnap.exists()) {
-        indexItems = indexSnap.data().items || [];
+      const indexData = await getChatbotSetting('chatbot_index_' + indexName, null);
+      if (indexData) {
+        indexItems = indexData.items || [];
       }
     } catch (indexErr) {
       console.warn(`Could not load semantic index ${indexName}:`, indexErr);
@@ -1042,9 +2161,7 @@ app.post("/api/chatbot/chat", async (req, res) => {
 
     if (isPropertyIntent) {
       try {
-        const propSnap = await getDocs(collection(db, 'properties'));
-        const allProperties: any[] = [];
-        propSnap.forEach(d => allProperties.push({ id: d.id, ...d.data() }));
+        const allProperties = await getPropertiesFromMySQL();
         livePropertiesMatched = findRelevantLiveProperties(message, allProperties);
       } catch (propErr) {
         console.warn("Could not query live properties directly:", propErr);
@@ -1198,9 +2315,9 @@ Respond to the User Message (Adhering to system persona, being concise and highl
       status: 'PROCESSED'
     };
     try {
-      await setDoc(doc(db, 'chatbot_crm_activities', activityId), activityRecord);
+      await logAuditOnServer('CRM Activity', 'Chat Intent Router', 'Chatbot End-User Message', null, activityRecord);
     } catch (crmErr) {
-      console.warn("Could not save CRM activity:", crmErr);
+      console.warn("Could not save CRM activity audit log:", crmErr);
     }
 
     res.json({ 
@@ -1226,9 +2343,9 @@ app.post("/api/chatbot/simulate", async (req, res) => {
 
     const gemini = getGemini();
 
-    const compiledSnap = await getDoc(doc(db, 'chatbot_settings', 'compiled_corpus'));
+    const compiledData = await getChatbotSetting('chatbot_settings_compiled_corpus', null);
     const fallbackSummary = "Dvarix Realty specializes in pre-cleared layouts in Devanahalli Aviation High Corridor, Whitefield price appreciation guides, custom scientific Vastu alignments, BBMP A-Khata licenses, and robust construction warranties.";
-    const groundKb = compiledSnap.exists() ? (compiledSnap.data().rawCorpus || fallbackSummary) : fallbackSummary;
+    const groundKb = compiledData ? (compiledData.rawCorpus || fallbackSummary) : fallbackSummary;
 
     // Sandbox execution configuration
     const draftConfig = config || DEFAULT_PERSONALITY;
@@ -1294,8 +2411,7 @@ ${groundKb.substring(0, 12000)}`;
     // Active compare response
     let publishedText = "";
     if (compare) {
-      const liveDocSnap = await getDoc(doc(db, 'chatbot_settings', 'config'));
-      const liveConfig = liveDocSnap.exists() ? liveDocSnap.data() : DEFAULT_PERSONALITY;
+      const liveConfig = await getChatbotSetting('chatbot_settings_config', DEFAULT_PERSONALITY);
       
       let liveRulesText = "";
       if (liveConfig.businessRules) {
@@ -1400,16 +2516,24 @@ Your objectives are:
   }
 };
 
+app.get("/api/chatbot/personality-versions", async (req, res) => {
+  try {
+    const versions = await getChatbotSetting('chatbot_personality_versions', []);
+    res.json({ success: true, data: versions });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET personality config safely with backend validation/defaulting
 app.get("/api/chatbot/personality-config", async (req, res) => {
   try {
     const isDraft = req.query.draft === 'true';
-    const docName = isDraft ? 'config_draft' : 'config';
-    const docSnap = await getDoc(doc(db, 'chatbot_settings', docName));
+    const docName = isDraft ? 'chatbot_settings_config_draft' : 'chatbot_settings_config';
+    const data = await getChatbotSetting(docName, null);
     
     let config = { ...DEFAULT_PERSONALITY };
-    if (docSnap.exists()) {
-      const data = docSnap.data();
+    if (data) {
       // Safe merge to ensure never returning null values
       Object.entries(data).forEach(([key, value]) => {
         if (value !== null && value !== undefined) {
@@ -1417,8 +2541,8 @@ app.get("/api/chatbot/personality-config", async (req, res) => {
         }
       });
     } else {
-      // Create defaults document in Firestore if it doesn't exist
-      await setDoc(doc(db, 'chatbot_settings', docName), DEFAULT_PERSONALITY);
+      // Create defaults document in MySQL if it doesn't exist
+      await saveChatbotSetting(docName, DEFAULT_PERSONALITY);
     }
     
     // Always return complete config, never null
@@ -1502,10 +2626,10 @@ app.post("/api/chatbot/personality-config", async (req, res) => {
       validated.creativity = rawCreativity;
     }
 
-    const docName = isDraft ? 'config_draft' : 'config';
+    const docName = isDraft ? 'chatbot_settings_config_draft' : 'chatbot_settings_config';
     
-    // Save to Firestore
-    await setDoc(doc(db, 'chatbot_settings', docName), validated);
+    // Save to MySQL settings
+    await saveChatbotSetting(docName, validated);
 
     // Track Audit Log
     const userEmail = operator || 'dvarixrealty@gmail.com';
@@ -1529,17 +2653,996 @@ app.post("/api/chatbot/personality-config", async (req, res) => {
       summary: isP ? `Published live production configuration parameters.` : `Saved draft configuration parameters.`,
       timestamp: new Date().toISOString()
     };
-    await setDoc(doc(db, 'chatbot_personality_versions', versionId), versionRecord);
+    
+    try {
+      const existingVersions = await getChatbotSetting('chatbot_personality_versions', []);
+      existingVersions.unshift(versionRecord);
+      if (existingVersions.length > 100) {
+        existingVersions.splice(100);
+      }
+      await saveChatbotSetting('chatbot_personality_versions', existingVersions);
+    } catch (verErr) {
+      console.warn("Could not save chatbot personality version:", verErr);
+    }
 
     // If publishing, sync draft as well to keep them aligned
     if (isP) {
-      await setDoc(doc(db, 'chatbot_settings', 'config_draft'), validated);
+      await saveChatbotSetting('chatbot_settings_config_draft', validated);
     }
 
     res.json({ success: true, config: validated });
   } catch (err: any) {
     console.error("Failed to save/publish config on backend:", err);
     res.status(500).json({ success: false, error: "Database connection error. Failed to save configuration." });
+  }
+});
+
+// ----------------------------------------------------
+// MEDIA CENTER (DAM SYSTEM) ROUTER & MULTIPART UPLOAD
+// ----------------------------------------------------
+
+const uploadDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const subfolders = [
+  "logos",
+  "properties",
+  "blogs",
+  "banners",
+  "agents",
+  "customers",
+  "documents",
+  "testimonials",
+  "projects",
+  "future"
+];
+
+subfolders.forEach(sub => {
+  const subPath = path.join(uploadDir, sub);
+  if (!fs.existsSync(subPath)) {
+    fs.mkdirSync(subPath, { recursive: true });
+  }
+});
+
+const mediaStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const requestedFolder = (req.query.folder as string) || "properties";
+    const cleanFolder = sanitizeFolder(requestedFolder);
+    const destPath = path.join(process.cwd(), "uploads", cleanFolder);
+    fs.mkdirSync(destPath, { recursive: true });
+    cb(null, destPath);
+  },
+  filename: (req, file, cb) => {
+    const rawName = file.originalname;
+    const lastDot = rawName.lastIndexOf(".");
+    const ext = lastDot !== -1 ? rawName.substring(lastDot).toLowerCase() : "";
+    let name = lastDot !== -1 ? rawName.substring(0, lastDot) : rawName;
+
+    // Convert filename to an SEO-friendly URL slug
+    name = name
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+
+    if (!name) name = "asset";
+
+    const requestedFolder = (req.query.folder as string) || "properties";
+    const cleanFolder = sanitizeFolder(requestedFolder);
+    const destPath = path.join(process.cwd(), "uploads", cleanFolder);
+
+    // Prevent name collisions on disk by suffixing sequential counts
+    let finalName = `${name}${ext}`;
+    let counter = 1;
+    while (fs.existsSync(path.join(destPath, finalName))) {
+      finalName = `${name}-${counter}${ext}`;
+      counter++;
+    }
+
+    cb(null, finalName);
+  }
+});
+
+const mediaUpload = multer({
+  storage: mediaStorage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // Max 50MB file size limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/svg+xml", "image/webp"];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type. Only JPG, JPEG, PNG, SVG, and WEBP are allowed."));
+    }
+  }
+});
+
+const cpUploadFields = mediaUpload.fields([
+  { name: "original", maxCount: 1 },
+  { name: "large", maxCount: 1 },
+  { name: "medium", maxCount: 1 },
+  { name: "small", maxCount: 1 },
+  { name: "thumbnail", maxCount: 1 }
+]);
+
+// Category Management Routes
+app.get("/api/mysql/media_categories", async (req, res) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT * FROM media_categories ORDER BY display_order ASC, created_at DESC");
+    res.json({ success: true, data: rows });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/mysql/media_categories", async (req, res) => {
+  try {
+    const { name, folder_name, description, icon, color, status, display_order } = req.body;
+    if (!name || !folder_name) {
+      return res.status(400).json({ success: false, error: "Category name and folder name are required." });
+    }
+    const id = "mc-" + Math.random().toString(36).substring(2, 9);
+    const pool = getPool();
+    await pool.query(
+      `INSERT INTO media_categories (id, name, folder_name, description, icon, color, status, display_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, name, folder_name, description || null, icon || "Folder", color || "#C89B3C", status || "Active", Number(display_order) || 0]
+    );
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put("/api/mysql/media_categories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, folder_name, description, icon, color, status, display_order } = req.body;
+    const pool = getPool();
+    await pool.query(
+      `UPDATE media_categories SET name = ?, folder_name = ?, description = ?, icon = ?, color = ?, status = ?, display_order = ? WHERE id = ?`,
+      [name, folder_name, description || null, icon || "Folder", color || "#C89B3C", status || "Active", Number(display_order) || 0, id]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete("/api/mysql/media_categories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    await pool.query("DELETE FROM media_categories WHERE id = ?", [id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Folder Management Routes
+app.get("/api/mysql/media_folders", async (req, res) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT * FROM media_folders ORDER BY path ASC");
+    res.json({ success: true, data: rows });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/mysql/media_folders", async (req, res) => {
+  try {
+    const { name, path: folderPath, parent_id } = req.body;
+    if (!name || !folderPath) {
+      return res.status(400).json({ success: false, error: "Folder name and relative path are required." });
+    }
+    
+    const cleanPath = folderPath.replace(/^\/|\/$/g, "").trim();
+    const pool = getPool();
+    
+    const [exists]: any = await pool.query("SELECT id FROM media_folders WHERE path = ?", [cleanPath]);
+    if (exists.length > 0) {
+      return res.status(400).json({ success: false, error: "A folder with this path already exists." });
+    }
+
+    const id = "mf-" + Math.random().toString(36).substring(2, 9);
+    
+    const physicalDir = path.join(process.cwd(), "uploads", cleanPath);
+    if (!fs.existsSync(physicalDir)) {
+      fs.mkdirSync(physicalDir, { recursive: true });
+    }
+
+    await pool.query(
+      `INSERT INTO media_folders (id, name, path, parent_id) VALUES (?, ?, ?, ?)`,
+      [id, name, cleanPath, parent_id || null]
+    );
+
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put("/api/mysql/media_folders/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, path: folderPath, parent_id } = req.body;
+    const pool = getPool();
+    
+    const [oldRows]: any = await pool.query("SELECT * FROM media_folders WHERE id = ?", [id]);
+    if (oldRows.length === 0) {
+      return res.status(404).json({ success: false, error: "Folder not found." });
+    }
+    const oldFolder = oldRows[0];
+    const cleanPath = folderPath.replace(/^\/|\/$/g, "").trim();
+
+    if (cleanPath !== oldFolder.path) {
+      const oldPhysicalDir = path.join(process.cwd(), "uploads", oldFolder.path);
+      const newPhysicalDir = path.join(process.cwd(), "uploads", cleanPath);
+      
+      if (fs.existsSync(oldPhysicalDir)) {
+        fs.renameSync(oldPhysicalDir, newPhysicalDir);
+      } else {
+        fs.mkdirSync(newPhysicalDir, { recursive: true });
+      }
+
+      await pool.query(
+        "UPDATE media_items SET folder = ?, storage_path = REPLACE(storage_path, ?, ?) WHERE folder = ?",
+        [cleanPath, `uploads/${oldFolder.path}`, `uploads/${cleanPath}`, oldFolder.path]
+      );
+    }
+
+    await pool.query(
+      `UPDATE media_folders SET name = ?, path = ?, parent_id = ? WHERE id = ?`,
+      [name, cleanPath, parent_id || null, id]
+    );
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete("/api/mysql/media_folders/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    
+    const [rows]: any = await pool.query("SELECT * FROM media_folders WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Folder not found" });
+    }
+    
+    await pool.query("DELETE FROM media_folders WHERE id = ?", [id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 1. Fetch All Assets
+app.get("/api/mysql/media_items", async (req, res) => {
+  try {
+    const items = await getMediaItems();
+    const normalized = items.map(item => normalizeMediaItemUrls(item, req));
+    res.json({ success: true, data: normalized });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. Scan and report usages for an asset dynamically
+app.get("/api/mysql/media_items/:id/usage", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT * FROM media_items WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Asset not found" });
+    }
+    const item = rows[0];
+    const usages = await findUsageOfImage(item.public_url);
+    
+    // Auto-update the cached usage count in MySQL for future quick reference
+    await pool.query("UPDATE media_items SET usage_count = ? WHERE id = ?", [usages.length, id]);
+    
+    res.json({ success: true, usages, usage_count: usages.length });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 3. Save/Register Asset Metadata manually
+app.post("/api/mysql/media_items", async (req, res) => {
+  try {
+    const item = req.body;
+    if (!item.id || !item.title || !item.storage_path || !item.public_url) {
+      return res.status(400).json({ success: false, error: "Missing required metadata parameters" });
+    }
+    const success = await saveMediaItem(item);
+    if (success) {
+      const normalizedItem = normalizeMediaItemUrls(item, req);
+      res.json({ success: true, data: normalizedItem });
+    } else {
+      res.status(500).json({ success: false, error: "Failed to persist media metadata" });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4. Update Asset SEO & Metadata details
+app.put("/api/mysql/media_items/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const metadata = req.body;
+    
+    // Check if a slug update was requested
+    if (metadata.slug) {
+      const renameResult = await renameMediaAsset(id, metadata.slug);
+      if (!renameResult.success) {
+        return res.status(400).json({ success: false, error: renameResult.error });
+      }
+      // Delete slug from metadata so we don't try to double-update it via simple updateMediaItemMetadata
+      delete metadata.slug;
+    }
+
+    const success = await updateMediaItemMetadata(id, metadata);
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(500).json({ success: false, error: "Failed to update asset metadata" });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5. Hard delete asset from disk and MySQL library (safeguarded)
+app.delete("/api/mysql/media_items/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT * FROM media_items WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Asset not found" });
+    }
+    
+    const item = rows[0];
+    const usages = await findUsageOfImage(item.public_url);
+    if (usages.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Cannot delete this asset because it is currently utilized across the platform.",
+        usages
+      });
+    }
+
+    // Delete db record
+    await deleteMediaItem(id);
+
+    // Safely delete physical original & responsive sizes from disk storage
+    const physicalFiles = [
+      item.storage_path,
+      item.thumbnail_url ? item.thumbnail_url.replace(/^\//, "") : null,
+      item.medium_url ? item.medium_url.replace(/^\//, "") : null,
+      item.large_url ? item.large_url.replace(/^\//, "") : null,
+      item.original_url ? item.original_url.replace(/^\//, "") : null
+    ].filter((p): p is string => typeof p === "string" && !!p);
+
+    physicalFiles.forEach((relPath) => {
+      try {
+        const fullPath = path.join(process.cwd(), relPath);
+        if (fs.existsSync(fullPath)) {
+          fs.unlinkSync(fullPath);
+        }
+      } catch (err: any) {
+        console.warn(`[Cleanup Warning] Could not delete physical file ${relPath}:`, err.message);
+      }
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 6. Support replacing an image while keeping the exact same public URL & storage path
+app.post("/api/mysql/media_replace", mediaUpload.single("file"), async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) {
+      if (req.file) { try { fs.unlinkSync(req.file.path); } catch {} }
+      return res.status(400).json({ success: false, error: "Missing asset ID" });
+    }
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ success: false, error: "No image file uploaded" });
+    }
+
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT * FROM media_items WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      try { fs.unlinkSync(file.path); } catch {}
+      return res.status(404).json({ success: false, error: "Asset not found" });
+    }
+
+    const currentItem = rows[0];
+    const targetPath = path.join(process.cwd(), currentItem.storage_path);
+
+    try {
+      // Overwrite current file on disk
+      if (file.path !== targetPath) {
+        fs.copyFileSync(file.path, targetPath);
+        fs.unlinkSync(file.path);
+      }
+    } catch (fsErr: any) {
+      console.error("Asset overwrite failed:", fsErr.message);
+      return res.status(500).json({ success: false, error: "Failed to overwrite physical server asset" });
+    }
+
+    // Refresh size and update updated_at
+    const stats = fs.statSync(targetPath);
+    await pool.query(
+      "UPDATE media_items SET file_size = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [stats.size, id]
+    );
+
+    res.json({ success: true, message: "Asset overwritten successfully." });
+  } catch (err: any) {
+    console.error("Replacement engine failure:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 7. Core Premium Multipart Upload with full metadata parsing
+app.post("/api/mysql/media_upload", (req, res) => {
+  cpUploadFields(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+
+    try {
+      const files = (req.files || {}) as { [fieldname: string]: Express.Multer.File[] };
+      const folder = (req.query.folder as string) || "properties";
+      const cleanFolder = sanitizeFolder(folder);
+      const uploadedBy = (req.query.uploaded_by as string) || "dvarixrealty@gmail.com";
+
+      const originalFile = files["original"]?.[0];
+      if (!originalFile) {
+        return res.status(400).json({ success: false, error: "Original image file is required" });
+      }
+
+      // Metadata to parse
+      const title = (req.body.title as string) || originalFile.originalname.split(".")[0];
+      const altText = (req.body.alt_text as string) || title;
+      const caption = (req.body.caption as string) || "";
+      const description = (req.body.description as string) || "";
+      const keywords = (req.body.keywords as string) || "";
+      const category = (req.body.category as string) || "All";
+      const width = req.body.width ? Number(req.body.width) : null;
+      const height = req.body.height ? Number(req.body.height) : null;
+      const aspectRatio = req.body.aspect_ratio || "";
+      const format = originalFile.mimetype.split("/")[1]?.toUpperCase() || "WEBP";
+
+      const itemId = "media-" + Math.random().toString(36).substring(2, 11);
+
+      // Custom SEO Input
+      let finalSlug = originalFile.filename.split(".")[0];
+      let finalFilename = originalFile.filename;
+
+      if (req.body.seo_filename) {
+        let cleanSlug = req.body.seo_filename
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, "-")
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "");
+        if (cleanSlug && cleanSlug !== finalSlug) {
+          const ext = path.extname(originalFile.filename).toLowerCase() || ".webp";
+          const destPath = path.join(process.cwd(), "uploads", cleanFolder);
+          
+          let testSlug = cleanSlug;
+          let testFilename = `${testSlug}${ext}`;
+          let counter = 1;
+
+          while (
+            fs.existsSync(path.join(destPath, testFilename)) ||
+            (await getPool().query(`SELECT id FROM media_items WHERE slug = ? AND folder = ?`, [testSlug, cleanFolder]).then(([r]: any) => r.length > 0))
+          ) {
+            testSlug = `${cleanSlug}-${counter}`;
+            testFilename = `${testSlug}${ext}`;
+            counter++;
+          }
+
+          // Rename files on disk
+          const filesToRename = [
+            { key: "original", fileObj: originalFile, suffix: "" },
+            { key: "large", fileObj: files["large"]?.[0], suffix: "-large" },
+            { key: "medium", fileObj: files["medium"]?.[0], suffix: "-medium" },
+            { key: "small", fileObj: files["small"]?.[0], suffix: "-small" },
+            { key: "thumbnail", fileObj: files["thumbnail"]?.[0], suffix: "-thumb" }
+          ];
+
+          for (const item of filesToRename) {
+            if (item.fileObj && fs.existsSync(item.fileObj.path)) {
+              const oldPath = item.fileObj.path;
+              const newName = `${testSlug}${item.suffix}${ext}`;
+              const newPath = path.join(destPath, newName);
+              fs.renameSync(oldPath, newPath);
+              item.fileObj.path = newPath;
+              item.fileObj.filename = newName;
+            }
+          }
+
+          finalSlug = testSlug;
+          finalFilename = testFilename;
+        }
+      }
+
+      // We construct paths relative to workspace root
+      const getRelativePath = (fileObj?: Express.Multer.File) => {
+        if (!fileObj) return null;
+        return path.relative(process.cwd(), fileObj.path).replace(/\\/g, "/");
+      };
+
+      const originalRelPath = getRelativePath(originalFile)!;
+      const relative_path = "/" + originalRelPath;
+
+      // Construct dynamic Public URL based on request host and protocol
+      const baseUrl = getPublicBaseUrl(req);
+      const public_url = `${baseUrl}${relative_path}`;
+
+      // Helper to generate absolute subfolder URLs based on responsive relative paths
+      const getPublicUrl = (relPath: string | null) => {
+        if (!relPath) return null;
+        return `${baseUrl}/${relPath}`;
+      };
+
+      // Responsive paths
+      const largeRelPath = getRelativePath(files["large"]?.[0]);
+      const mediumRelPath = getRelativePath(files["medium"]?.[0]);
+      const smallRelPath = getRelativePath(files["small"]?.[0]);
+      const thumbRelPath = getRelativePath(files["thumbnail"]?.[0]);
+
+      const mediaItemRecord = {
+        id: itemId,
+        title,
+        seo_filename: finalFilename,
+        slug: finalSlug,
+        alt_text: altText,
+        caption,
+        description,
+        keywords,
+        folder: cleanFolder,
+        category,
+        width,
+        height,
+        aspect_ratio: aspectRatio,
+        format,
+        file_size: originalFile.size,
+        storage_path: originalRelPath,
+        public_url: public_url,
+        thumbnail_url: getPublicUrl(thumbRelPath) || public_url,
+        medium_url: getPublicUrl(mediumRelPath) || public_url,
+        large_url: getPublicUrl(largeRelPath) || public_url,
+        original_url: public_url,
+        uploaded_by: uploadedBy,
+        status: "Active",
+        usage_count: 0,
+        
+        // Extended DAM System Attributes
+        original_filename: originalFile.originalname,
+        stored_filename: finalFilename,
+        mime_type: originalFile.mimetype || "image/webp",
+        filesize: originalFile.size,
+        optimization_status: "Optimized (WebP)",
+        relative_path: relative_path
+      };
+
+      const saveSuccess = await saveMediaItem(mediaItemRecord);
+      if (saveSuccess) {
+        const normalizedItem = normalizeMediaItemUrls(mediaItemRecord, req);
+        res.json({ success: true, data: normalizedItem });
+      } else {
+        res.status(500).json({ success: false, error: "Failed to store asset metadata in database" });
+      }
+
+    } catch (uploadErr: any) {
+      console.error("Upload process error:", uploadErr);
+      res.status(500).json({ success: false, error: uploadErr.message });
+    }
+  });
+});
+
+// ==================================================
+// ENTERPRISE PUBLIC URL & MEDIA PICKER BACKEND API
+// ==================================================
+
+// 1. Fetch All Assets (Supports Search, Filters, Sorting, Favorites)
+app.get("/api/media/assets", async (req, res) => {
+  try {
+    const pool = getPool();
+    let query = "SELECT * FROM media_items WHERE 1=1";
+    const params: any[] = [];
+
+    if (req.query.folder && req.query.folder !== "all") {
+      query += " AND folder = ?";
+      params.push(req.query.folder);
+    }
+    if (req.query.category && req.query.category !== "all") {
+      if (req.query.category === "Image") {
+        query += " AND (category = 'Image' OR category IN ('Apartments', 'Villas', 'Commercial', 'Lands', 'Logos', 'Portraits', 'Marketing', 'Banners') OR mime_type LIKE 'image/%' OR format IN ('JPG', 'JPEG', 'PNG', 'WEBP', 'GIF', 'SVG', 'BMP', 'TIFF'))";
+      } else if (req.query.category === "Document") {
+        query += " AND (category = 'Document' OR category IN ('Uncategorized', 'documents') OR mime_type LIKE 'application/%' OR format IN ('PDF', 'DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX', 'TXT', 'CSV') OR mime_type LIKE 'text/%')";
+      } else {
+        query += " AND category = ?";
+        params.push(req.query.category);
+      }
+    }
+    if (req.query.format && req.query.format !== "all") {
+      query += " AND format = ?";
+      params.push((req.query.format as string).toUpperCase());
+    }
+    if (req.query.favorite !== undefined && req.query.favorite !== "") {
+      query += " AND favorite = ?";
+      params.push(req.query.favorite === "true" || req.query.favorite === "1" ? 1 : 0);
+    }
+    if (req.query.unused === "true") {
+      query += " AND usage_count = 0";
+    }
+    if (req.query.search) {
+      query += " AND (title LIKE ? OR seo_filename LIKE ? OR alt_text LIKE ? OR keywords LIKE ?)";
+      const term = `%${req.query.search}%`;
+      params.push(term, term, term, term);
+    }
+
+    // Sort options
+    const sortBy = req.query.sortBy as string;
+    if (sortBy === "size_desc") {
+      query += " ORDER BY file_size DESC";
+    } else if (sortBy === "size_asc") {
+      query += " ORDER BY file_size ASC";
+    } else if (sortBy === "usages_desc") {
+      query += " ORDER BY usage_count DESC";
+    } else if (sortBy === "name_asc") {
+      query += " ORDER BY title ASC";
+    } else if (sortBy === "recently_used") {
+      query += " ORDER BY last_used_at DESC, created_at DESC";
+    } else {
+      query += " ORDER BY created_at DESC";
+    }
+
+    const [rows]: any = await pool.query(query, params);
+    const normalized = rows.map((item: any) => normalizeMediaItemUrls(item, req));
+    res.json({ success: true, count: normalized.length, data: normalized });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. Search Assets (Dynamic Search Endpoint)
+app.get("/api/media/search", async (req, res) => {
+  try {
+    const pool = getPool();
+    const q = req.query.q as string;
+    if (!q) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+    const term = `%${q}%`;
+    const query = `
+      SELECT * FROM media_items 
+      WHERE title LIKE ? OR seo_filename LIKE ? OR alt_text LIKE ? OR keywords LIKE ? OR category LIKE ?
+      ORDER BY created_at DESC
+    `;
+    const [rows]: any = await pool.query(query, [term, term, term, term, term]);
+    const normalized = rows.map((item: any) => normalizeMediaItemUrls(item, req));
+    res.json({ success: true, count: normalized.length, data: normalized });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 3. Folders Directory Analytics
+app.get("/api/media/folders", async (req, res) => {
+  try {
+    const pool = getPool();
+    const query = `
+      SELECT folder as name, COUNT(*) as asset_count, SUM(file_size) as total_size 
+      FROM media_items 
+      GROUP BY folder 
+      ORDER BY name ASC
+    `;
+    const [rows]: any = await pool.query(query);
+    res.json({ success: true, data: rows });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4. Categories Analytics
+app.get("/api/media/categories", async (req, res) => {
+  try {
+    const pool = getPool();
+    const query = `
+      SELECT category as name, COUNT(*) as asset_count 
+      FROM media_items 
+      GROUP BY category 
+      ORDER BY asset_count DESC
+    `;
+    const [rows]: any = await pool.query(query);
+    res.json({ success: true, data: rows });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5. Get Public URL By ID
+app.get("/api/media/public-url/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT * FROM media_items WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Asset not found" });
+    }
+    const item = normalizeMediaItemUrls(rows[0], req);
+    res.json({ success: true, public_url: item.public_url, title: item.title, format: item.format });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 6. Get Single Asset Metadata by ID
+app.get("/api/media/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT * FROM media_items WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Asset not found" });
+    }
+    const item = normalizeMediaItemUrls(rows[0], req);
+    res.json({ success: true, data: item });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 7. Core Premium Upload with SEO collision handling
+app.post("/api/media/upload", (req, res) => {
+  cpUploadFields(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+
+    try {
+      const files = (req.files || {}) as { [fieldname: string]: Express.Multer.File[] };
+      const folder = (req.query.folder as string) || "properties";
+      const cleanFolder = sanitizeFolder(folder);
+      const uploadedBy = (req.query.uploaded_by as string) || "dvarixrealty@gmail.com";
+
+      const originalFile = files["original"]?.[0];
+      if (!originalFile) {
+        return res.status(400).json({ success: false, error: "Original image file is required" });
+      }
+
+      const pool = getPool();
+
+      // Retrieve titles / SEO filename inputs
+      const title = (req.body.title as string) || originalFile.originalname.split(".")[0];
+      const altText = (req.body.alt_text as string) || title;
+      const caption = (req.body.caption as string) || "";
+      const description = (req.body.description as string) || "";
+      const keywords = (req.body.keywords as string) || "";
+      const category = (req.body.category as string) || "All";
+      const width = req.body.width ? Number(req.body.width) : null;
+      const height = req.body.height ? Number(req.body.height) : null;
+      const aspectRatio = req.body.aspect_ratio || null;
+      const format = originalFile.mimetype.split("/")[1]?.toUpperCase() || "WEBP";
+
+      // SEO-friendly clean filename slugification
+      const lastDot = originalFile.originalname.lastIndexOf(".");
+      const ext = lastDot !== -1 ? originalFile.originalname.substring(lastDot).toLowerCase() : ".webp";
+      const userSeoInput = (req.body.seo_filename as string) || title;
+      
+      let baseSlug = userSeoInput
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+      if (!baseSlug) baseSlug = "asset";
+
+      const destPath = path.join(process.cwd(), "uploads", cleanFolder);
+      
+      let finalBaseSlug = baseSlug;
+      let finalFilename = `${finalBaseSlug}${ext}`;
+      let counter = 1;
+
+      // Sequential collision loop
+      while (true) {
+        const [rows]: any = await pool.query(
+          "SELECT id FROM media_items WHERE folder = ? AND seo_filename = ?",
+          [cleanFolder, finalFilename]
+        );
+        const diskExists = fs.existsSync(path.join(destPath, finalFilename));
+        if (rows.length === 0 && !diskExists) {
+          break;
+        }
+        finalBaseSlug = `${baseSlug}-${counter}`;
+        finalFilename = `${finalBaseSlug}${ext}`;
+        counter++;
+      }
+
+      // Rename original file on disk
+      const newOriginalRelPath = `uploads/${cleanFolder}/${finalFilename}`;
+      const newOriginalFullPath = path.join(process.cwd(), newOriginalRelPath);
+      fs.renameSync(originalFile.path, newOriginalFullPath);
+
+      // Handle other sizes dynamically if they exist
+      const renameSubversion = (fileObj?: Express.Multer.File, suffix?: string) => {
+        if (!fileObj) return null;
+        const subRelPath = `uploads/${cleanFolder}/${finalBaseSlug}${suffix}${ext}`;
+        const subFullPath = path.join(process.cwd(), subRelPath);
+        fs.renameSync(fileObj.path, subFullPath);
+        return "/" + subRelPath;
+      };
+
+      const thumbPublicUrl = renameSubversion(files["thumbnail"]?.[0], "-thumb") || ("/" + newOriginalRelPath);
+      const mediumPublicUrl = renameSubversion(files["medium"]?.[0], "-medium") || ("/" + newOriginalRelPath);
+      const largePublicUrl = renameSubversion(files["large"]?.[0], "-large") || ("/" + newOriginalRelPath);
+
+      // Calculate asset file hash for duplicate tracking
+      let fileHash = "";
+      try {
+        fileHash = crypto.createHash("md5").update(fs.readFileSync(newOriginalFullPath)).digest("hex");
+      } catch (hashErr) {
+        console.warn("Hashing err:", hashErr);
+      }
+
+      const itemId = "media-" + Math.random().toString(36).substring(2, 11);
+
+      const mediaItemRecord = {
+        id: itemId,
+        title,
+        seo_filename: finalFilename,
+        slug: finalBaseSlug,
+        alt_text: altText,
+        caption,
+        description,
+        keywords,
+        folder: cleanFolder,
+        category,
+        width,
+        height,
+        aspect_ratio: aspectRatio,
+        format,
+        file_size: originalFile.size,
+        storage_path: newOriginalRelPath,
+        public_url: "/" + newOriginalRelPath,
+        thumbnail_url: thumbPublicUrl,
+        medium_url: mediumPublicUrl,
+        large_url: largePublicUrl,
+        original_url: "/" + newOriginalRelPath,
+        uploaded_by: uploadedBy,
+        status: "Active",
+        usage_count: 0,
+        relative_path: newOriginalRelPath,
+        last_used_at: null,
+        favorite: req.body.favorite === "true" || req.body.favorite === "1" ? 1 : 0,
+        seo_slug: finalBaseSlug,
+        canonical_filename: finalFilename,
+        hash: fileHash
+      };
+
+      const saveSuccess = await saveMediaItem(mediaItemRecord);
+      if (saveSuccess) {
+        const normalizedItem = normalizeMediaItemUrls(mediaItemRecord, req);
+        res.json({ success: true, data: normalizedItem });
+      } else {
+        res.status(500).json({ success: false, error: "Failed to save asset metadata to MySQL." });
+      }
+    } catch (err: any) {
+      console.error("Upload process error:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+});
+
+// 8. Select Media Asset (Increments usage count and updates last_used_at timestamp)
+app.post("/api/media/select", async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) {
+      return res.status(400).json({ success: false, error: "Asset ID is required." });
+    }
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT * FROM media_items WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Asset not found." });
+    }
+    const item = rows[0];
+    const usages = await findUsageOfImage(item.public_url);
+    const count = Math.max(usages.length, item.usage_count + 1);
+
+    await pool.query(
+      "UPDATE media_items SET usage_count = ?, last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [count, id]
+    );
+
+    res.json({ 
+      success: true, 
+      message: "Asset selection recorded successfully.", 
+      usage_count: count,
+      last_used_at: new Date().toISOString()
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 9. Update Asset Metadata (title, alt_text, category, favorite, keywords)
+app.put("/api/media/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const metadata = req.body;
+    const success = await updateMediaItemMetadata(id, metadata);
+    if (success) {
+      res.json({ success: true, message: "Asset metadata updated successfully." });
+    } else {
+      res.status(500).json({ success: false, error: "Failed to update asset metadata." });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 10. Delete Asset safely (guarded by usage verification)
+app.delete("/api/media/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const [rows]: any = await pool.query("SELECT * FROM media_items WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Asset not found" });
+    }
+    
+    const item = rows[0];
+    const usages = await findUsageOfImage(item.public_url);
+    if (usages.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Cannot delete this asset because it is currently utilized across the platform.",
+        usages
+      });
+    }
+
+    await deleteMediaItem(id);
+
+    // Delete physical files
+    const physicalFiles = [
+      item.storage_path,
+      item.thumbnail_url ? item.thumbnail_url.replace(/^\//, "") : null,
+      item.medium_url ? item.medium_url.replace(/^\//, "") : null,
+      item.large_url ? item.large_url.replace(/^\//, "") : null,
+      item.original_url ? item.original_url.replace(/^\//, "") : null
+    ].filter((p): p is string => typeof p === "string" && !!p);
+
+    physicalFiles.forEach((relPath) => {
+      try {
+        const fullPath = path.join(process.cwd(), relPath);
+        if (fs.existsSync(fullPath)) {
+          fs.unlinkSync(fullPath);
+        }
+      } catch (err: any) {
+        console.warn(`[Cleanup Warning] Could not delete physical file ${relPath}:`, err.message);
+      }
+    });
+
+    res.json({ success: true, message: "Asset permanently deleted." });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1557,6 +3660,21 @@ async function startServer() {
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
+  }
+
+  // Trigger Hostinger MySQL connection test and table initialization on startup
+  try {
+    const connected = await testMySQLConnection();
+    if (connected) {
+      await initializePropertiesTable();
+      await initializePhase5Tables();
+      await initializePhase6Tables();
+      await initializePhase7Tables();
+      await initializeCmsTables();
+      await initializeMediaTable();
+    }
+  } catch (err: any) {
+    console.error("⚠️ Graceful startup warning: MySQL test connection or table initialization failed to complete:", err.message);
   }
 
   app.listen(PORT, "0.0.0.0", () => {

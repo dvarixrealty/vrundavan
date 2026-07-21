@@ -11,7 +11,7 @@ import {
   increment
 } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType, auth } from "../firebase";
-import { Property, Inquiry, CustomRequirement, Agent, MapLocation, AdminUser, FAQ, MapSettings, QuickFilter, AiPermission, AiActivityLog, CentralEnquiry, RoutingRule, SiteCMSConfig, HeroBanner, CampaignService, FreeServiceRequest, AdminTheme } from "../types";
+import { Property, Inquiry, CustomRequirement, Agent, MapLocation, AdminUser, FAQ, MapSettings, QuickFilter, AiPermission, AiActivityLog, CentralEnquiry, RoutingRule, SiteCMSConfig, HeroBanner, CampaignService, FreeServiceRequest, AdminTheme, BrandingSetting } from "../types";
 
 // Firebase Services Helper
 export function cleanPropertyPayload(property: any): any {
@@ -564,6 +564,15 @@ export const firebaseService = {
     }
   },
 
+  async deleteAgent(agentId: string) {
+    const path = `agents/${agentId}`;
+    try {
+      await deleteDoc(doc(db, "agents", agentId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+
   // Sync Map Locations
   subscribeMapLocations(onUpdate: (map: Record<string, MapLocation>) => void, onError: (err: any) => void) {
     const path = "map_locations";
@@ -1001,6 +1010,127 @@ export const firebaseService = {
     }
   },
 
+  // Sync Website Identity Branding Settings
+  subscribeBrandingSettings(onUpdate: (settings: BrandingSetting) => void, onError: (err: any) => void) {
+    const path = "settings/brand_identity";
+    try {
+      return onSnapshot(
+        doc(db, "settings", "brand_identity"),
+        (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            const mapped: BrandingSetting = {
+              id: "brand_identity",
+              companyName: data.brandName || data.companyName || "Dvarix Realty",
+              brandName: data.brandName || "Dvarix Realty",
+              tagline: data.tagline || "Luxury Real Estate Advisory",
+              logoUrl: data.logoUrl || "",
+              faviconUrl: data.faviconUrl || "",
+              seoLogoUrl: data.seoLogoUrl || data.logoUrl || "",
+              ogImageUrl: data.socialImageUrl || data.ogImageUrl || "",
+              bannerImageUrl: data.bannerImageUrl || "",
+              socialImageUrl: data.socialImageUrl || "",
+              websiteUrl: data.websiteUrl || "https://dvarixrealty.com",
+              email: data.contactDetails?.email || data.email || "dvarixrealty@gmail.com",
+              phone: data.contactDetails?.phone || data.phone || "+91 63009 84846",
+              useLogoAsSeoLogo: data.useLogoAsSeoLogo !== false,
+              updatedAt: data.updatedAt || new Date().toISOString(),
+              updatedBy: data.updatedBy || "System",
+              socialLinks: data.socialLinks || {
+                facebook: "",
+                instagram: "",
+                linkedin: "",
+                youtube: "",
+                twitter: ""
+              },
+              contactDetails: data.contactDetails || {
+                email: "dvarixrealty@gmail.com",
+                phone: "+91 63009 84846",
+                whatsapp: ""
+              }
+            };
+            onUpdate(mapped);
+          } else {
+            const defaults: BrandingSetting = {
+              id: "brand_identity",
+              companyName: "Dvarix Realty",
+              brandName: "Dvarix Realty",
+              tagline: "Luxury Real Estate Advisory",
+              logoUrl: "",
+              faviconUrl: "",
+              seoLogoUrl: "",
+              ogImageUrl: "",
+              bannerImageUrl: "",
+              socialImageUrl: "",
+              websiteUrl: "https://dvarixrealty.com",
+              email: "dvarixrealty@gmail.com",
+              phone: "+91 63009 84846",
+              useLogoAsSeoLogo: true,
+              updatedAt: new Date().toISOString(),
+              updatedBy: "System",
+              socialLinks: {
+                facebook: "",
+                instagram: "",
+                linkedin: "",
+                youtube: "",
+                twitter: ""
+              },
+              contactDetails: {
+                email: "dvarixrealty@gmail.com",
+                phone: "+91 63009 84846",
+                whatsapp: ""
+              }
+            };
+            onUpdate(defaults);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, path);
+          onError(error);
+        }
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  },
+
+  async saveBrandingSettings(settings: BrandingSetting) {
+    const path = "settings/brand_identity";
+    try {
+      const docData = {
+        brandName: settings.brandName || settings.companyName || "Dvarix Realty",
+        companyName: settings.brandName || settings.companyName || "Dvarix Realty",
+        tagline: settings.tagline || "",
+        logoUrl: settings.logoUrl || "",
+        faviconUrl: settings.faviconUrl || "",
+        bannerImageUrl: settings.bannerImageUrl || "",
+        socialImageUrl: settings.socialImageUrl || settings.ogImageUrl || "",
+        ogImageUrl: settings.socialImageUrl || settings.ogImageUrl || "",
+        websiteUrl: settings.websiteUrl || "",
+        socialLinks: settings.socialLinks || {
+          facebook: "",
+          instagram: "",
+          linkedin: "",
+          youtube: "",
+          twitter: ""
+        },
+        contactDetails: settings.contactDetails || {
+          email: settings.email || "",
+          phone: settings.phone || "",
+          whatsapp: ""
+        },
+        useLogoAsSeoLogo: settings.useLogoAsSeoLogo !== false,
+        seoLogoUrl: settings.seoLogoUrl || "",
+        updatedAt: settings.updatedAt || new Date().toISOString(),
+        updatedBy: settings.updatedBy || "System"
+      };
+      await setDoc(doc(db, "settings", "brand_identity"), docData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+      throw error;
+    }
+  },
+
   // Sync Admin Users concept
   subscribeAdminUsers(onUpdate: (users: AdminUser[]) => void, onError: (err: any) => void) {
     const path = "admin_users";
@@ -1030,6 +1160,15 @@ export const firebaseService = {
       await setDoc(doc(db, "admin_users", user.id), user);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  async deleteAdminUser(userId: string) {
+    const path = `admin_users/${userId}`;
+    try {
+      await deleteDoc(doc(db, "admin_users", userId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
     }
   },
 

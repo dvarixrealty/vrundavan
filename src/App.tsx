@@ -13,8 +13,10 @@ import PropertiesPageView from './components/PropertiesPageView';
 import ExploreOpportunities from './components/ExploreOpportunities';
 import SaaSLocationDetailView from './components/SaaSLocationDetailView';
 import PropertyDetailModal from './components/PropertyDetailModal';
+import PremiumPropertyDetailView from './components/PremiumPropertyDetailView';
 import CustomRequestModal from './components/CustomRequestModal';
 import SiteVisitBookingModal from './components/SiteVisitBookingModal';
+import TalkToExpertModal from './components/TalkToExpertModal';
 import InquiryDashboard from './components/InquiryDashboard';
 import RealtyChatbot from './components/RealtyChatbot';
 import FavoritesDrawer from './components/FavoritesDrawer';
@@ -24,9 +26,12 @@ import PrivacyPolicyView from './components/PrivacyPolicyView';
 import TermsConditionsView from './components/TermsConditionsView';
 import Footer from './components/Footer';
 import BlogArticlePage from './components/BlogArticlePage';
+import Logo from './components/Logo';
 import { ActiveTab, Property, Inquiry, CustomRequirement, Agent, MapLocation, AdminUser, FAQ, MapSettings, SearchCategory, PropertyTypeCard, QuickFilter, CentralEnquiry, RoutingRule, SiteCMSConfig, HeroBanner } from './types';
 import { PROPERTIES } from './data';
 import { firebaseService } from './lib/firebaseService';
+import { mysqlClientService } from './lib/mysqlClientService';
+import { getLocalCache, CACHE_KEYS } from './utils/localStorageCache';
 import { db, handleFirestoreError, OperationType, auth } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, deleteDoc } from 'firebase/firestore';
@@ -121,8 +126,109 @@ const SAMPLE_REQUIREMENTS: CustomRequirement[] = [
   }
 ];
 
+const GLOBAL_DEFAULT_CATEGORIES: PropertyTypeCard[] = [
+  { id: 'Apartment', title: 'Apartment', description: 'Stellar complexes', iconName: 'Building1', displayOrder: 1, status: 'Active', showInView: true, redirectUrl: '/properties?type=apartment' },
+  { id: 'Villa', title: 'Villa', description: 'Luxury residences', iconName: 'Home', displayOrder: 2, status: 'Active', showInView: true, redirectUrl: '/properties?type=villa' },
+  { id: 'Commercial', title: 'Commercial', description: 'Corporate estates', iconName: 'Building2', displayOrder: 3, status: 'Active', showInView: true, redirectUrl: '/properties?type=commercial' },
+  { id: 'Plot', title: 'Plot', description: 'Premium Land', iconName: 'Map', displayOrder: 4, status: 'Active', showInView: true, redirectUrl: '/properties?type=plot' },
+  { id: 'Warehouse', title: 'Warehouse', description: 'Industrial hubs', iconName: 'Warehouse', displayOrder: 5, status: 'Active', showInView: true, redirectUrl: '/properties?type=warehouse' },
+  { id: 'Homestay', title: 'Homestay', description: 'Bespoke retreats', iconName: 'Hotel', displayOrder: 6, status: 'Active', showInView: true, redirectUrl: '/properties?type=homestay' }
+];
+
+const GLOBAL_DEFAULT_SEARCH_CATEGORIES: SearchCategory[] = [
+  { id: 'Properties', title: 'Properties', iconName: 'Building2', displayOrder: 1, status: 'Active', showInView: true, isDefault: true },
+  { id: 'Plots', title: 'Plots', iconName: 'Landmark', displayOrder: 2, status: 'Active', showInView: true },
+  { id: 'Apartments', title: 'Apartments', iconName: 'Building2', displayOrder: 3, status: 'Active', showInView: true },
+  { id: 'Villas', title: 'Villas', iconName: 'Compass', displayOrder: 4, status: 'Active', showInView: true },
+  { id: 'Commercial', title: 'Commercial', iconName: 'Award', displayOrder: 5, status: 'Active', showInView: true },
+  { id: 'House for Rent', title: 'House for Rent', iconName: 'Clock', displayOrder: 6, status: 'Active', showInView: true },
+  { id: 'PG / Stay', title: 'PG / Stay', iconName: 'Bed', displayOrder: 7, status: 'Active', showInView: true },
+  { id: 'Warehouses', title: 'Warehouses', iconName: 'Ruler', displayOrder: 8, status: 'Active', showInView: true }
+];
+
+const GLOBAL_DEFAULT_AGENTS: Agent[] = [
+  {
+    id: 'agent-1',
+    name: 'Raghav Reddy',
+    role: 'Director of Southern Acquisitions',
+    avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=150&q=80',
+    phone: '+91 6300984846',
+    email: 'raghav.r@dvarix.com'
+  },
+  {
+    id: 'agent-2',
+    name: 'Priya Sharma',
+    role: 'Bespoke Portfolio Advisor',
+    avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=150&q=80',
+    phone: '+91 6300984846',
+    email: 'p.sharma@dvarix.com'
+  },
+  {
+    id: 'agent-3',
+    name: 'Anirudh Naidu',
+    role: 'Premium Villa Lead',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
+    phone: '+91 6300984846',
+    email: 'a.naidu@dvarix.com'
+  }
+];
+
+const GLOBAL_DEFAULT_MAP_LOCATIONS: Record<string, MapLocation> = {
+  'JP Nagar': {
+    name: 'JP Nagar',
+    slug: 'jp-nagar',
+    x: '28%',
+    y: '58%',
+    listings: 8,
+    avgValuation: '₹1.8 Cr',
+    benefits: 'High demand residential, metro access, premium villas',
+    description: 'Elite residential hub with fully-developed green layouts, top schools, and modern multi-level villas.',
+    growth: '+14.2% YoY ROI',
+    city: 'Bengaluru',
+    state: 'Karnataka',
+    country: 'India',
+    latitude: 12.9105,
+    longitude: 77.5857,
+    status: 'Active',
+    featured: true,
+    displayOrder: 1,
+    availableOpportunities: 8,
+    activeRequirements: 24,
+    siteVisits: 14,
+    demandLevel: 'Very High',
+    investmentPotential: 'Exceptional',
+    averageBudget: '₹1.5 Cr - ₹3.5 Cr',
+    growthRate: '14.2%',
+    avgPropertyValue: '₹1.8 Cr',
+    locationHighlights: 'Metro Connectivity, Green Belts, Elite Schools, Food Streets',
+    showOnHomepage: true,
+    featuredLocation: true,
+    activePin: true,
+    pinColor: '#ff5a3c',
+    pinIcon: 'Home',
+    redirectType: 'Location Page',
+    redirectUrl: '/location/jp-nagar'
+  }
+};
+
+const GLOBAL_DEFAULT_QUICK_FILTERS: QuickFilter[] = [
+  { id: 'q-villa', name: 'Villa', status: 'Active' },
+  { id: 'q-commercial', name: 'Commercial', status: 'Active' },
+  { id: 'q-premium', name: 'Premium', status: 'Active' }
+];
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('Home');
+  const [isDbConsoleOpen, setIsDbConsoleOpen] = useState<boolean>(false);
+  const [useFirebase, setUseFirebaseState] = useState<boolean>(() => {
+    const saved = localStorage.getItem('dvarix_use_firebase');
+    return saved === 'true'; // Defaults to false, so MySQL is PRIMARY by default!
+  });
+
+  const setUseFirebase = (val: boolean) => {
+    setUseFirebaseState(val);
+    localStorage.setItem('dvarix_use_firebase', val ? 'true' : 'false');
+  };
   const isPopStateRef = useRef(false);
   const [selectedLocationSlug, setSelectedLocationSlug] = useState<string | null>(null);
   const [selectedArticleSlug, setSelectedArticleSlug] = useState<string | null>(null);
@@ -131,8 +237,20 @@ export default function App() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [isFavoritesOpen, setIsFavoritesOpen] = useState(false);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
+
+  const handleViewPropertyDetails = (property: Property) => {
+    const cachedConfigs = getLocalCache<any[]>('dvarix_cache_property_seo_configs', []);
+    const config = cachedConfigs.find(c => c.id === property.id);
+    const slug = config?.urlSlug || property.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+    setSelectedProperty(property);
+    setActiveTab('PropertyDetail');
+    window.history.pushState(null, '', `/property/${slug}`);
+  };
+
   const [isCustomRequestOpen, setIsCustomRequestOpen] = useState(false);
   const [isSiteVisitBookingOpen, setIsSiteVisitBookingOpen] = useState(false);
+  const [isTalkToExpertOpen, setIsTalkToExpertOpen] = useState(false);
+  const [talkToExpertProperty, setTalkToExpertProperty] = useState<Property | null>(null);
   const [bookingTargetProperty, setBookingTargetProperty] = useState<Property | null>(null);
   const [siteVisitPrefilled, setSiteVisitPrefilled] = useState<any>(null);
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
@@ -140,13 +258,13 @@ export default function App() {
   const [centralEnquiries, setCentralEnquiries] = useState<CentralEnquiry[]>([]);
   const [routingRules, setRoutingRules] = useState<RoutingRule[]>([]);
   const [contactSuccess, setContactSuccess] = useState(false);
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [categories, setCategories] = useState<PropertyTypeCard[]>([]);
-  const [searchCategories, setSearchCategories] = useState<SearchCategory[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [mapLocations, setMapLocations] = useState<Record<string, MapLocation>>({});
+  const [properties, setProperties] = useState<Property[]>(PROPERTIES);
+  const [categories, setCategories] = useState<PropertyTypeCard[]>(GLOBAL_DEFAULT_CATEGORIES);
+  const [searchCategories, setSearchCategories] = useState<SearchCategory[]>(GLOBAL_DEFAULT_SEARCH_CATEGORIES);
+  const [agents, setAgents] = useState<Agent[]>(GLOBAL_DEFAULT_AGENTS);
+  const [mapLocations, setMapLocations] = useState<Record<string, MapLocation>>(GLOBAL_DEFAULT_MAP_LOCATIONS);
   const [faqs, setFaqs] = useState<FAQ[]>([]);
-  const [quickFilters, setQuickFilters] = useState<QuickFilter[]>([]);
+  const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(GLOBAL_DEFAULT_QUICK_FILTERS);
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [heroBanners, setHeroBanners] = useState<HeroBanner[]>([]);
   
@@ -275,6 +393,9 @@ export default function App() {
       } else if (path === '/properties' || path.startsWith('/properties/')) {
         setSelectedLocationSlug(null);
         setActiveTab('Properties');
+      } else if (path.startsWith('/property/')) {
+        setSelectedLocationSlug(null);
+        setActiveTab('PropertyDetail');
       } else if (path.startsWith('/insights/')) {
         const slug = path.split('/insights/')[1];
         if (slug) {
@@ -295,6 +416,12 @@ export default function App() {
         setSelectedLocationSlug(null);
         if (path === '/' || path === '') {
           setActiveTab('Home');
+        } else if (path === '/privacy-policy') {
+          setActiveTab('PrivacyPolicy');
+        } else if (path === '/terms-conditions') {
+          setActiveTab('Terms');
+        } else {
+          setActiveTab('404');
         }
       }
     };
@@ -309,6 +436,66 @@ export default function App() {
     };
   }, []);
 
+  // Listen to custom navigation events from components
+  useEffect(() => {
+    const handleRealtyNav = (e: any) => {
+      if (e.detail?.tab) {
+        setActiveTab(e.detail.tab);
+      }
+    };
+    const handleSelectPropEvent = (e: any) => {
+      if (e.detail?.property) {
+        handleViewPropertyDetails(e.detail.property);
+      }
+    };
+    window.addEventListener('realty-navigate', handleRealtyNav);
+    window.addEventListener('select-property', handleSelectPropEvent);
+    return () => {
+      window.removeEventListener('realty-navigate', handleRealtyNav);
+      window.removeEventListener('select-property', handleSelectPropEvent);
+    };
+  }, []);
+
+  // Synchronise dynamic property URL slug on property state load or URL change
+  useEffect(() => {
+    const path = window.location.pathname;
+    const isPropertyPath = path.startsWith('/property/');
+    const isPropertiesPath = path.startsWith('/properties/');
+    
+    if ((isPropertyPath || isPropertiesPath) && properties.length > 0) {
+      const prefix = isPropertyPath ? '/property/' : '/properties/';
+      const slug = path.split(prefix)[1];
+      if (slug) {
+        // Check for 301 redirects first!
+        const cachedRedirects = getLocalCache<any[]>(CACHE_KEYS.SEO_REDIRECTS, []);
+        const activeRedirect = cachedRedirects.find(r => r.fromUrl === `${prefix}${slug}`);
+        
+        let targetSlug = slug;
+        if (activeRedirect) {
+          const destSlug = activeRedirect.toUrl.split(prefix)[1];
+          if (destSlug) {
+            targetSlug = destSlug;
+            window.history.replaceState(null, '', activeRedirect.toUrl);
+          }
+        }
+
+        // Search property list
+        const cachedConfigs = getLocalCache<any[]>('dvarix_cache_property_seo_configs', []);
+        
+        const matched = properties.find(p => {
+          const config = cachedConfigs.find(c => c.id === p.id);
+          const currentSlug = config?.urlSlug || p.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+          return currentSlug === targetSlug || p.id === targetSlug;
+        });
+
+        if (matched) {
+          setSelectedProperty(matched);
+          setActiveTab(isPropertyPath ? 'PropertyDetail' : 'Properties');
+        }
+      }
+    }
+  }, [properties, activeTab]);
+
   // Synchronise state changes to update the URL path
   useEffect(() => {
     const currentPathName = window.location.pathname;
@@ -319,19 +506,42 @@ export default function App() {
     } else if (activeTab === 'Insights' && selectedArticleSlug) {
       targetPath = `/insights/${selectedArticleSlug}`;
     } else if (activeTab === 'Properties') {
-      targetPath = '/properties';
+      if (selectedProperty) {
+        const cachedConfigs = getLocalCache<any[]>('dvarix_cache_property_seo_configs', []);
+        const config = cachedConfigs.find(c => c.id === selectedProperty.id);
+        const slug = config?.urlSlug || selectedProperty.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+        targetPath = `/properties/${slug}`;
+      } else {
+        targetPath = '/properties';
+      }
+    } else if (activeTab === 'PropertyDetail') {
+      if (selectedProperty) {
+        const cachedConfigs = getLocalCache<any[]>('dvarix_cache_property_seo_configs', []);
+        const config = cachedConfigs.find(c => c.id === selectedProperty.id);
+        const slug = config?.urlSlug || selectedProperty.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+        targetPath = `/property/${slug}`;
+      } else {
+        targetPath = '/properties';
+      }
     } else if (activeTab === 'About') {
       targetPath = '/about';
     } else if (activeTab === 'Admin') {
       targetPath = loggedInUser ? '/admin' : '/admin/login';
     } else if (activeTab === 'Contact') {
       targetPath = '/contact';
+    } else if (activeTab === 'PrivacyPolicy') {
+      targetPath = '/privacy-policy';
+    } else if (activeTab === 'Terms') {
+      targetPath = '/terms-conditions';
+    } else if (activeTab === '404') {
+      targetPath = currentPathName;
     } else {
       targetPath = '/';
     }
 
     if (currentPathName !== targetPath && !currentPathName.startsWith('/location/') && !currentPathName.startsWith('/insights/')) {
-      if (activeTab === 'Properties' && currentPathName.startsWith('/properties')) {
+      if (activeTab === 'Properties' || activeTab === 'PropertyDetail') {
+        window.history.pushState(null, '', targetPath);
         return;
       }
       if (activeTab === 'Insights' && currentPathName.startsWith('/insights')) {
@@ -339,7 +549,7 @@ export default function App() {
       }
       window.history.pushState(null, '', targetPath);
     }
-  }, [activeTab, selectedLocationSlug, loggedInUser, selectedArticleSlug]);
+  }, [activeTab, selectedLocationSlug, loggedInUser, selectedArticleSlug, selectedProperty]);
 
   const handleNavigateToLocation = (slug: string) => {
     const formattedSlug = slug.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -619,6 +829,281 @@ export default function App() {
   });
 
   const listingsRef = useRef<HTMLDivElement>(null);
+
+  // Reusable MySQL data loader
+  const loadAllFromMySQL = async () => {
+    try {
+      console.log("[MySQL Load] Fetching all data from MySQL...");
+      const [
+        mysqlProps,
+        mysqlCats,
+        mysqlSearchCats,
+        mysqlAgents,
+        mysqlMapLocs,
+        mysqlInq,
+        mysqlCentEnq,
+        mysqlRules,
+        mysqlReqs,
+        mysqlAdmins,
+        mysqlFAQs,
+        mysqlHeroBanners,
+        mysqlQFilters,
+        mysqlSett
+      ] = await Promise.all([
+        mysqlClientService.getProperties(),
+        mysqlClientService.getCategories(),
+        mysqlClientService.getSearchCategories(),
+        mysqlClientService.getAgents(),
+        mysqlClientService.getMapLocations(),
+        mysqlClientService.getInquiries(),
+        mysqlClientService.getCentralEnquiries(),
+        mysqlClientService.getRoutingRules(),
+        mysqlClientService.getRequirements(),
+        mysqlClientService.getAdminUsers(),
+        mysqlClientService.getFaqs(),
+        mysqlClientService.getHeroBanners(),
+        mysqlClientService.getQuickFilters(),
+        mysqlClientService.getSettings()
+      ]);
+
+      console.log("[MySQL Load] Fetch completed successfully.");
+
+      if (mysqlProps && mysqlProps.length > 0) setProperties(mysqlProps);
+      if (mysqlCats && mysqlCats.length > 0) setCategories(mysqlCats);
+      if (mysqlSearchCats && mysqlSearchCats.length > 0) setSearchCategories(mysqlSearchCats);
+      if (mysqlAgents && mysqlAgents.length > 0) setAgents(mysqlAgents);
+      if (mysqlMapLocs) {
+        if (Array.isArray(mysqlMapLocs)) {
+          const mapObj: Record<string, MapLocation> = {};
+          mysqlMapLocs.forEach((loc: any) => {
+            mapObj[loc.name] = loc;
+          });
+          setMapLocations(mapObj);
+        } else if (Object.keys(mysqlMapLocs).length > 0) {
+          setMapLocations(mysqlMapLocs);
+        }
+      }
+      if (mysqlInq) setInquiries(mysqlInq);
+      if (mysqlCentEnq) setCentralEnquiries(mysqlCentEnq);
+      if (mysqlRules) setRoutingRules(mysqlRules);
+      if (mysqlReqs) setCustomRequirements(mysqlReqs);
+      if (mysqlAdmins) setAdminUsers(mysqlAdmins);
+      if (mysqlFAQs) setFaqs(mysqlFAQs);
+      if (mysqlHeroBanners) setHeroBanners(mysqlHeroBanners);
+      if (mysqlQFilters && mysqlQFilters.length > 0) setQuickFilters(mysqlQFilters);
+
+      if (mysqlSett && Array.isArray(mysqlSett)) {
+        const mapS = mysqlSett.find((s: any) => s.id === 'map_settings' || s.key_name === 'map_settings');
+        if (mapS) setMapSettings(mapS);
+        const siteS = mysqlSett.find((s: any) => s.id === 'site_settings' || s.key_name === 'site_settings');
+        if (siteS) setSiteSettings(siteS);
+      }
+    } catch (err) {
+      console.error("❌ Error loading data from MySQL:", err);
+    }
+  };
+
+  // Unified Database Router for CRUD dual-writes
+  const unifiedDb = {
+    async saveProperty(p: Property) {
+      if (useFirebase) {
+        await firebaseService.saveProperty(p);
+      } else {
+        await mysqlClientService.saveProperty(p);
+        firebaseService.saveProperty(p).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteProperty(id: string) {
+      if (useFirebase) {
+        await firebaseService.deleteProperty(id);
+      } else {
+        await mysqlClientService.deleteProperty(id);
+        firebaseService.deleteProperty(id).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveCategory(cat: PropertyTypeCard) {
+      if (useFirebase) {
+        await firebaseService.saveCategory(cat);
+      } else {
+        await mysqlClientService.saveCategory(cat);
+        firebaseService.saveCategory(cat).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteCategory(id: string) {
+      if (useFirebase) {
+        await firebaseService.deleteCategory(id);
+      } else {
+        await mysqlClientService.deleteCategory(id);
+        firebaseService.deleteCategory(id).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveSearchCategory(cat: SearchCategory) {
+      if (useFirebase) {
+        await firebaseService.saveSearchCategory(cat);
+      } else {
+        await mysqlClientService.saveSearchCategory(cat);
+        firebaseService.saveSearchCategory(cat).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteSearchCategory(id: string) {
+      if (useFirebase) {
+        await firebaseService.deleteSearchCategory(id);
+      } else {
+        await mysqlClientService.deleteSearchCategory(id);
+        firebaseService.deleteSearchCategory(id).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveAgent(ag: Agent) {
+      if (useFirebase) {
+        await firebaseService.saveAgent(ag);
+      } else {
+        await mysqlClientService.saveAgent(ag);
+        firebaseService.saveAgent(ag).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteAgent(id: string) {
+      if (useFirebase) {
+        await firebaseService.deleteAgent(id);
+      } else {
+        await mysqlClientService.deleteAgent(id);
+        firebaseService.deleteAgent(id).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveMapLocation(loc: MapLocation) {
+      if (useFirebase) {
+        await firebaseService.saveMapLocation(loc);
+      } else {
+        await mysqlClientService.saveMapLocation(loc);
+        firebaseService.saveMapLocation(loc).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteMapLocation(name: string) {
+      if (useFirebase) {
+        await firebaseService.deleteMapLocation(name);
+      } else {
+        await mysqlClientService.deleteMapLocation(name);
+        firebaseService.deleteMapLocation(name).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveInquiry(inq: Inquiry) {
+      if (useFirebase) {
+        await firebaseService.saveInquiry(inq);
+      } else {
+        await mysqlClientService.saveInquiry(inq);
+        firebaseService.saveInquiry(inq).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteInquiry(id: string) {
+      if (useFirebase) {
+        await firebaseService.deleteInquiry(id);
+      } else {
+        await mysqlClientService.deleteInquiry(id);
+        firebaseService.deleteInquiry(id).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveCentralEnquiry(enq: CentralEnquiry) {
+      if (useFirebase) {
+        await firebaseService.saveCentralEnquiry(enq);
+      } else {
+        await mysqlClientService.saveCentralEnquiry(enq);
+        firebaseService.saveCentralEnquiry(enq).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteCentralEnquiry(id: string) {
+      if (useFirebase) {
+        await firebaseService.deleteCentralEnquiry(id);
+      } else {
+        await mysqlClientService.deleteCentralEnquiry(id);
+        firebaseService.deleteCentralEnquiry(id).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveRequirement(req: CustomRequirement) {
+      if (useFirebase) {
+        await firebaseService.saveRequirement(req);
+      } else {
+        await mysqlClientService.saveRequirement(req);
+        firebaseService.saveRequirement(req).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteRequirement(id: string) {
+      if (useFirebase) {
+        await firebaseService.deleteRequirement(id);
+      } else {
+        await mysqlClientService.deleteRequirement(id);
+        firebaseService.deleteRequirement(id).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveAdminUser(u: AdminUser) {
+      if (useFirebase) {
+        await firebaseService.saveAdminUser(u);
+      } else {
+        await mysqlClientService.saveAdminUser(u);
+        firebaseService.saveAdminUser(u).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteAdminUser(id: string) {
+      if (useFirebase) {
+        await firebaseService.deleteAdminUser(id);
+      } else {
+        await mysqlClientService.deleteAdminUser(id);
+        firebaseService.deleteAdminUser(id).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveQuickFilter(f: QuickFilter) {
+      if (useFirebase) {
+        await firebaseService.saveQuickFilter(f);
+      } else {
+        await mysqlClientService.saveQuickFilter(f);
+        firebaseService.saveQuickFilter(f).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async deleteQuickFilter(id: string) {
+      if (useFirebase) {
+        await firebaseService.deleteQuickFilter(id);
+      } else {
+        await mysqlClientService.deleteQuickFilter(id);
+        firebaseService.deleteQuickFilter(id).catch(err => console.warn("Firebase dual delete background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveMapSettings(sett: MapSettings) {
+      if (useFirebase) {
+        await firebaseService.saveMapSettings(sett);
+      } else {
+        await mysqlClientService.saveSetting("map_settings", sett);
+        firebaseService.saveMapSettings(sett).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    },
+    async saveSiteSettings(sett: SiteCMSConfig) {
+      if (useFirebase) {
+        await firebaseService.saveSiteSettings(sett);
+      } else {
+        await mysqlClientService.saveSetting("site_settings", sett);
+        firebaseService.saveSiteSettings(sett).catch(err => console.warn("Firebase dual write background fail:", err));
+        await loadAllFromMySQL();
+      }
+    }
+  };
 
   // Initialize data from Firebase & local storage fallback
   useEffect(() => {
@@ -936,198 +1421,224 @@ export default function App() {
       }
     ];
 
-    async function initializeFirebaseAndLoad() {
-      try {
-        if (await firebaseService.isCollectionEmpty('properties')) {
-          console.log("Seeding properties sequence into Firestore...");
-          for (const item of PROPERTIES) {
-            await firebaseService.saveProperty(item);
+    let activeCleanup: (() => void) | null = null;
+
+    async function startDatabase() {
+      if (useFirebase) {
+        console.log("[DATA RECRUITER] Firebase Rollback Mode Active. Subscribing to Firestore...");
+        try {
+          if (await firebaseService.isCollectionEmpty('properties')) {
+            console.log("Seeding properties sequence into Firestore...");
+            for (const item of PROPERTIES) {
+              await firebaseService.saveProperty(item);
+            }
           }
-        }
-        
-        if (await firebaseService.isCollectionEmpty('categories')) {
-          console.log("Seeding categories into Firestore...");
-          for (const cat of DEFAULT_CATEGORIES) {
-            await firebaseService.saveCategory(cat);
+          
+          if (await firebaseService.isCollectionEmpty('categories')) {
+            console.log("Seeding categories into Firestore...");
+            for (const cat of DEFAULT_CATEGORIES) {
+              await firebaseService.saveCategory(cat);
+            }
           }
-        }
 
-        if (await firebaseService.isCollectionEmpty('search_categories')) {
-          console.log("Seeding search categories in Firestore...");
-          for (const sCat of DEFAULT_SEARCH_CATEGORIES) {
-            await firebaseService.saveSearchCategory(sCat);
+          if (await firebaseService.isCollectionEmpty('search_categories')) {
+            console.log("Seeding search categories in Firestore...");
+            for (const sCat of DEFAULT_SEARCH_CATEGORIES) {
+              await firebaseService.saveSearchCategory(sCat);
+            }
           }
-        }
 
-        if (await firebaseService.isCollectionEmpty('agents')) {
-          console.log("Seeding agents into Firestore...");
-          for (const ag of DEFAULT_AGENTS) {
-            await firebaseService.saveAgent(ag);
+          if (await firebaseService.isCollectionEmpty('agents')) {
+            console.log("Seeding agents into Firestore...");
+            for (const ag of DEFAULT_AGENTS) {
+              await firebaseService.saveAgent(ag);
+            }
           }
-        }
 
-        if (await firebaseService.isCollectionEmpty('map_locations')) {
-          console.log("Seeding map locations into Firestore...");
-          for (const name of Object.keys(DEFAULT_MAP_LOCATIONS)) {
-            await firebaseService.saveMapLocation(DEFAULT_MAP_LOCATIONS[name]);
+          if (await firebaseService.isCollectionEmpty('map_locations')) {
+            console.log("Seeding map locations into Firestore...");
+            for (const name of Object.keys(DEFAULT_MAP_LOCATIONS)) {
+              await firebaseService.saveMapLocation(DEFAULT_MAP_LOCATIONS[name]);
+            }
           }
-        }
 
-        if (await firebaseService.isCollectionEmpty('admin_users')) {
-          console.log("Seeding admin users credentials into Firestore...");
-          for (const admin of DEFAULT_ADMIN_USERS) {
-            await firebaseService.saveAdminUser(admin);
+          if (await firebaseService.isCollectionEmpty('admin_users')) {
+            console.log("Seeding admin users credentials into Firestore...");
+            for (const admin of DEFAULT_ADMIN_USERS) {
+              await firebaseService.saveAdminUser(admin);
+            }
           }
-        }
 
-        if (await firebaseService.isCollectionEmpty('inquiries')) {
-          console.log("Seeding sample inquiries into Firestore...");
-          for (const inq of SAMPLE_INQUIRIES) {
-            await firebaseService.saveInquiry(inq);
+          if (await firebaseService.isCollectionEmpty('inquiries')) {
+            console.log("Seeding sample inquiries into Firestore...");
+            for (const inq of SAMPLE_INQUIRIES) {
+              await firebaseService.saveInquiry(inq);
+            }
           }
-        }
 
-        if (await firebaseService.isCollectionEmpty('requirements')) {
-          console.log("Seeding sample custom requirements into Firestore...");
-          for (const req of SAMPLE_REQUIREMENTS) {
-            await firebaseService.saveRequirement(req);
+          if (await firebaseService.isCollectionEmpty('requirements')) {
+            console.log("Seeding sample custom requirements into Firestore...");
+            for (const req of SAMPLE_REQUIREMENTS) {
+              await firebaseService.saveRequirement(req);
+            }
           }
-        }
 
-        console.log("Seeding FAQs if empty...");
-        await firebaseService.seedDefaultFAQs();
+          console.log("Seeding FAQs if empty...");
+          await firebaseService.seedDefaultFAQs();
 
-        console.log("Seeding Hero Banners if empty...");
-        await firebaseService.seedDefaultHeroBanners();
+          console.log("Seeding Hero Banners if empty...");
+          await firebaseService.seedDefaultHeroBanners();
 
-        const DEFAULT_QUICK_FILTERS: QuickFilter[] = [
-          { id: 'q-villa', name: 'Villa', status: 'Active' },
-          { id: 'q-commercial', name: 'Commercial', status: 'Active' },
-          { id: 'q-premium', name: 'Premium', status: 'Active' }
-        ];
-        if (await firebaseService.isCollectionEmpty('quick_filters')) {
-          console.log("Seeding quick filters in Firestore...");
-          for (const qf of DEFAULT_QUICK_FILTERS) {
-            await firebaseService.saveQuickFilter(qf);
-          }
-        }
-      } catch (err) {
-        console.warn("Could not seed Firebase db, falling back to local storage models:", err);
-      }
-
-      // Live Snapshot Subscriptions
-      const unsubscribeProperties = firebaseService.subscribeProperties(
-        (list) => {
-          console.log("[CMS DEBUG 4] App.tsx snapshot listener received new document list. Total items count:", list.length);
-          setProperties(list);
-        },
-        (err) => console.error("[CMS DEBUG 4] Properties subscription failed with error:", err)
-      );
-
-      const unsubscribeCategories = firebaseService.subscribeCategories(
-        (list) => setCategories(list),
-        (err) => console.error("Categories subscription failed", err)
-      );
-
-      const unsubscribeSearchCategories = firebaseService.subscribeSearchCategories(
-        (list) => setSearchCategories(list),
-        (err) => console.error("Search categories subscription failed", err)
-      );
-
-      const unsubscribeAgents = firebaseService.subscribeAgents(
-        (list) => setAgents(list),
-        (err) => console.error("Agents subscription failed", err)
-      );
-
-      const unsubscribeMapLocations = firebaseService.subscribeMapLocations(
-        (map) => setMapLocations(map),
-        (err) => console.error("Map locations subscription failed", err)
-      );
-
-      const unsubscribeInquiries = firebaseService.subscribeInquiries(
-        (list) => setInquiries(list),
-        (err) => console.error("Inquiries subscription failed", err)
-      );
-
-      const unsubscribeCentralEnquiries = firebaseService.subscribeCentralEnquiries(
-        (list) => setCentralEnquiries(list),
-        (err) => console.error("Central enquiries subscription failed", err)
-      );
-
-      const unsubscribeRoutingRules = firebaseService.subscribeRoutingRules(
-        (list) => setRoutingRules(list),
-        (err) => console.error("Routing rules subscription failed", err)
-      );
-
-      const unsubscribeRequirements = firebaseService.subscribeRequirements(
-        (list) => setCustomRequirements(list),
-        (err) => console.error("Requirements subscription failed", err)
-      );
-
-      const unsubscribeAdminUsers = firebaseService.subscribeAdminUsers(
-        (list) => setAdminUsers(list),
-        (err) => console.error("Admin user list subscription failed", err)
-      );
-
-      const unsubscribeFAQs = firebaseService.subscribeFAQs(
-        (list) => setFaqs(list),
-        (err) => console.error("FAQs subscription failed", err)
-      );
-
-      const unsubscribeMapSettings = firebaseService.subscribeMapSettings(
-        (sett) => setMapSettings(sett),
-        (err) => console.error("Map settings subscription failed", err)
-      );
-
-      const unsubscribeSiteSettings = firebaseService.subscribeSiteSettings(
-        (sett) => setSiteSettings(sett),
-        (err) => console.error("Site settings subscription failed", err)
-      );
-
-      const unsubscribeHeroBanners = firebaseService.subscribeHeroBanners(
-        (list) => setHeroBanners(list),
-        (err) => console.error("Hero banners subscription failed", err)
-      );
-
-      const unsubscribeQuickFilters = firebaseService.subscribeQuickFilters(
-        (list) => {
           const DEFAULT_QUICK_FILTERS: QuickFilter[] = [
             { id: 'q-villa', name: 'Villa', status: 'Active' },
             { id: 'q-commercial', name: 'Commercial', status: 'Active' },
             { id: 'q-premium', name: 'Premium', status: 'Active' }
           ];
-          setQuickFilters(list.length > 0 ? list : DEFAULT_QUICK_FILTERS);
-        },
-        (err) => console.error("Quick filters subscription failed", err)
-      );
+          if (await firebaseService.isCollectionEmpty('quick_filters')) {
+            console.log("Seeding quick filters in Firestore...");
+            for (const qf of DEFAULT_QUICK_FILTERS) {
+              await firebaseService.saveQuickFilter(qf);
+            }
+          }
+        } catch (err) {
+          console.warn("Could not seed Firebase db, falling back to local storage models:", err);
+        }
 
-      return () => {
-        if (unsubscribeProperties) unsubscribeProperties();
-        if (unsubscribeCategories) unsubscribeCategories();
-        if (unsubscribeSearchCategories) unsubscribeSearchCategories();
-        if (unsubscribeAgents) unsubscribeAgents();
-        if (unsubscribeMapLocations) unsubscribeMapLocations();
-        if (unsubscribeInquiries) unsubscribeInquiries();
-        if (unsubscribeCentralEnquiries) unsubscribeCentralEnquiries();
-        if (unsubscribeRoutingRules) unsubscribeRoutingRules();
-        if (unsubscribeRequirements) unsubscribeRequirements();
-        if (unsubscribeAdminUsers) unsubscribeAdminUsers();
-        if (unsubscribeFAQs) unsubscribeFAQs();
-        if (unsubscribeMapSettings) unsubscribeMapSettings();
-        if (unsubscribeSiteSettings) unsubscribeSiteSettings();
-        if (unsubscribeHeroBanners) unsubscribeHeroBanners();
-        if (unsubscribeQuickFilters) unsubscribeQuickFilters();
-      };
+        // Live Snapshot Subscriptions
+        const unsubscribeProperties = firebaseService.subscribeProperties(
+          (list) => {
+            console.log("[CMS DEBUG 4] App.tsx snapshot listener received new document list. Total items count:", list.length);
+            setProperties(list);
+          },
+          (err) => console.error("[CMS DEBUG 4] Properties subscription failed with error:", err)
+        );
+
+        const unsubscribeCategories = firebaseService.subscribeCategories(
+          (list) => setCategories(list),
+          (err) => console.error("Categories subscription failed", err)
+        );
+
+        const unsubscribeSearchCategories = firebaseService.subscribeSearchCategories(
+          (list) => setSearchCategories(list),
+          (err) => console.error("Search categories subscription failed", err)
+        );
+
+        const unsubscribeAgents = firebaseService.subscribeAgents(
+          (list) => setAgents(list),
+          (err) => console.error("Agents subscription failed", err)
+        );
+
+        const unsubscribeMapLocations = firebaseService.subscribeMapLocations(
+          (map) => setMapLocations(map),
+          (err) => console.error("Map locations subscription failed", err)
+        );
+
+        const unsubscribeInquiries = firebaseService.subscribeInquiries(
+          (list) => setInquiries(list),
+          (err) => console.error("Inquiries subscription failed", err)
+        );
+
+        const unsubscribeCentralEnquiries = firebaseService.subscribeCentralEnquiries(
+          (list) => setCentralEnquiries(list),
+          (err) => console.error("Central enquiries subscription failed", err)
+        );
+
+        const unsubscribeRoutingRules = firebaseService.subscribeRoutingRules(
+          (list) => setRoutingRules(list),
+          (err) => console.error("Routing rules subscription failed", err)
+        );
+
+        const unsubscribeRequirements = firebaseService.subscribeRequirements(
+          (list) => setCustomRequirements(list),
+          (err) => console.error("Requirements subscription failed", err)
+        );
+
+        const unsubscribeAdminUsers = firebaseService.subscribeAdminUsers(
+          (list) => setAdminUsers(list),
+          (err) => console.error("Admin user list subscription failed", err)
+        );
+
+        const unsubscribeFAQs = firebaseService.subscribeFAQs(
+          (list) => setFaqs(list),
+          (err) => console.error("FAQs subscription failed", err)
+        );
+
+        const unsubscribeMapSettings = firebaseService.subscribeMapSettings(
+          (sett) => setMapSettings(sett),
+          (err) => console.error("Map settings subscription failed", err)
+        );
+
+        const unsubscribeSiteSettings = firebaseService.subscribeSiteSettings(
+          (sett) => setSiteSettings(sett),
+          (err) => console.error("Site settings subscription failed", err)
+        );
+
+        const unsubscribeHeroBanners = firebaseService.subscribeHeroBanners(
+          (list) => setHeroBanners(list),
+          (err) => console.error("Hero banners subscription failed", err)
+        );
+
+        const unsubscribeQuickFilters = firebaseService.subscribeQuickFilters(
+          (list) => {
+            const DEFAULT_QUICK_FILTERS: QuickFilter[] = [
+              { id: 'q-villa', name: 'Villa', status: 'Active' },
+              { id: 'q-commercial', name: 'Commercial', status: 'Active' },
+              { id: 'q-premium', name: 'Premium', status: 'Active' }
+            ];
+            setQuickFilters(list.length > 0 ? list : DEFAULT_QUICK_FILTERS);
+          },
+          (err) => console.error("Quick filters subscription failed", err)
+        );
+
+        activeCleanup = () => {
+          if (unsubscribeProperties) unsubscribeProperties();
+          if (unsubscribeCategories) unsubscribeCategories();
+          if (unsubscribeSearchCategories) unsubscribeSearchCategories();
+          if (unsubscribeAgents) unsubscribeAgents();
+          if (unsubscribeMapLocations) unsubscribeMapLocations();
+          if (unsubscribeInquiries) unsubscribeInquiries();
+          if (unsubscribeCentralEnquiries) unsubscribeCentralEnquiries();
+          if (unsubscribeRoutingRules) unsubscribeRoutingRules();
+          if (unsubscribeRequirements) unsubscribeRequirements();
+          if (unsubscribeAdminUsers) unsubscribeAdminUsers();
+          if (unsubscribeFAQs) unsubscribeFAQs();
+          if (unsubscribeMapSettings) unsubscribeMapSettings();
+          if (unsubscribeSiteSettings) unsubscribeSiteSettings();
+          if (unsubscribeHeroBanners) unsubscribeHeroBanners();
+          if (unsubscribeQuickFilters) unsubscribeQuickFilters();
+        };
+      } else {
+        console.log("[DATA RECRUITER] MySQL Primary Mode Active. Loading from Hostinger MySQL...");
+        await loadAllFromMySQL();
+        
+        const handleRefreshMysql = () => {
+          console.log("[DATA RECRUITER] Custom MySQL refresh event received. Reloading...");
+          loadAllFromMySQL();
+        };
+        window.addEventListener('refresh-mysql-data', handleRefreshMysql);
+
+        // Setup 120 seconds (2 mins) interval to poll fresh MySQL data in background to protect connection limit
+        const intervalId = setInterval(() => {
+          loadAllFromMySQL();
+        }, 120000);
+
+        activeCleanup = () => {
+          clearInterval(intervalId);
+          window.removeEventListener('refresh-mysql-data', handleRefreshMysql);
+        };
+      }
     }
 
-    const cleanupPromise = initializeFirebaseAndLoad();
+    const startPromise = startDatabase();
 
     return () => {
-      cleanupPromise.then((cleanup) => {
-        if (cleanup) cleanup();
+      startPromise.then(() => {
+        if (activeCleanup) {
+          activeCleanup();
+        }
       });
     };
-  }, []);
+  }, [useFirebase]);
 
   // Sync favorites changes
   const toggleFavorite = (id: string) => {
@@ -1211,7 +1722,7 @@ export default function App() {
       status: 'New'
     } as CentralEnquiry;
 
-    await firebaseService.saveCentralEnquiry(completeEnquiry);
+    await unifiedDb.saveCentralEnquiry(completeEnquiry);
   };
 
   // Handle adding a client consultation inquiry from listings
@@ -1222,7 +1733,7 @@ export default function App() {
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       status: 'New'
     };
-    firebaseService.saveInquiry(inquiry);
+    unifiedDb.saveInquiry(inquiry);
 
     // Call unified central enquiry router
     handleRegistryCentralEnquiry(
@@ -1236,17 +1747,55 @@ export default function App() {
     );
   };
 
+  // Handle dedicated "Talk to Expert" inquiry submission
+  const handleAddTalkToExpertInquiry = (expertData: {
+    propertyId?: string;
+    propertyName?: string;
+    name: string;
+    email: string;
+    phone: string;
+    message: string;
+    preferredTime: string;
+    contactMethod: 'Phone' | 'WhatsApp' | 'Email';
+  }) => {
+    const inquiry: Inquiry = {
+      id: `inq-${Date.now()}`,
+      name: expertData.name,
+      email: expertData.email,
+      phone: expertData.phone,
+      message: expertData.message,
+      preferredTime: expertData.preferredTime,
+      contactMethod: expertData.contactMethod,
+      propertyId: expertData.propertyId,
+      propertyName: expertData.propertyName,
+      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      status: 'New'
+    };
+    unifiedDb.saveInquiry(inquiry);
+
+    // Call unified central enquiry router
+    handleRegistryCentralEnquiry(
+      expertData.name,
+      expertData.email,
+      expertData.phone,
+      expertData.message,
+      'Website Form',
+      'Talk To Expert Form',
+      { propertyName: expertData.propertyName || 'General Expert Advice Request' }
+    );
+  };
+
   // Update listings CRM status
   const handleUpdateInquiryStatus = (id: string, nextStatus: Inquiry['status']) => {
     const target = inquiries.find(i => i.id === id);
     if (target) {
-      firebaseService.saveInquiry({ ...target, status: nextStatus });
+      unifiedDb.saveInquiry({ ...target, status: nextStatus });
     }
   };
 
   // Delete inquiries
   const handleDeleteInquiry = (id: string) => {
-    firebaseService.deleteInquiry(id);
+    unifiedDb.deleteInquiry(id);
   };
 
   // Add Custom Requirements mandates from users
@@ -1257,7 +1806,7 @@ export default function App() {
       status: 'New',
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     };
-    firebaseService.saveRequirement(newRequirement);
+    unifiedDb.saveRequirement(newRequirement);
 
     // Call unified central enquiry router
     handleRegistryCentralEnquiry(
@@ -1279,13 +1828,13 @@ export default function App() {
   const handleUpdateRequirementStatus = (id: string, nextStatus: CustomRequirement['status']) => {
     const target = customRequirements.find(r => r.id === id);
     if (target) {
-      firebaseService.saveRequirement({ ...target, status: nextStatus });
+      unifiedDb.saveRequirement({ ...target, status: nextStatus });
     }
   };
 
   // Delete custom mandates from admin workstation
   const handleDeleteRequirementStatus = (id: string) => {
-    firebaseService.deleteRequirement(id);
+    unifiedDb.deleteRequirement(id);
   };
 
   const scrollToListings = () => {
@@ -1367,7 +1916,7 @@ export default function App() {
       preferredTime: slots[Math.floor(Math.random() * slots.length)]
     };
 
-    firebaseService.saveInquiry(randomInq);
+    unifiedDb.saveInquiry(randomInq);
   };
 
   // Inject sample requirement for test CRM review
@@ -1404,26 +1953,28 @@ export default function App() {
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     };
 
-    firebaseService.saveRequirement(randomReq);
+    unifiedDb.saveRequirement(randomReq);
   };
 
   return (
     <div className="min-h-screen bg-[#0a192f] text-slate-100 font-sans flex flex-col justify-between">
       
       {/* Sticky Top-level Header Navigation */}
-      <Header
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        favoriteCount={favorites.length}
-        onOpenFavorites={() => setIsFavoritesOpen(true)}
-        onOpenCustomRequest={() => setIsCustomRequestOpen(true)}
-        loggedInUser={loggedInUser}
-        onLogout={() => {
-          setLoggedInUser(null);
-          localStorage.removeItem('dvarix_current_user');
-          setActiveTab('Home');
-        }}
-      />
+      {activeTab !== 'Admin' && (
+        <Header
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          favoriteCount={favorites.length}
+          onOpenFavorites={() => setIsFavoritesOpen(true)}
+          onOpenCustomRequest={() => setIsCustomRequestOpen(true)}
+          loggedInUser={loggedInUser}
+          onLogout={() => {
+            setLoggedInUser(null);
+            localStorage.removeItem('dvarix_current_user');
+            setActiveTab('Home');
+          }}
+        />
+      )}
 
       {/* Primary Routing Dashboard */}
       <main className="flex-grow">
@@ -1449,7 +2000,7 @@ export default function App() {
               location={matchedLocation as MapLocation}
               properties={properties}
               onBack={handleBackToHomeMap}
-              onViewPropertyDetails={setSelectedProperty}
+              onViewPropertyDetails={handleViewPropertyDetails}
               onOpenCustomRequest={() => setIsCustomRequestOpen(true)}
             />
           );
@@ -1469,7 +2020,7 @@ export default function App() {
               quickFilters={quickFilters}
               mapSettings={mapSettings}
               properties={properties}
-              onViewProperty={setSelectedProperty}
+              onViewProperty={handleViewPropertyDetails}
               siteSettings={siteSettings}
             />
 
@@ -1503,7 +2054,7 @@ export default function App() {
                   searchFilter={searchFilter}
                   favorites={favorites}
                   toggleFavorite={toggleFavorite}
-                  onViewDetails={setSelectedProperty}
+                  onViewDetails={handleViewPropertyDetails}
                   properties={properties}
                   categories={categories}
                   onViewAllProperties={() => {
@@ -1528,7 +2079,7 @@ export default function App() {
                 mapLocations={mapLocations}
                 mapSettings={mapSettings}
                 properties={properties}
-                onViewDetails={setSelectedProperty}
+                onViewDetails={handleViewPropertyDetails}
                 onOpenCustomRequest={() => setIsCustomRequestOpen(true)}
                 setSearchFilter={setSearchFilter}
                 scrollToListings={scrollToListings}
@@ -1563,9 +2114,13 @@ export default function App() {
             properties={properties}
             favorites={favorites}
             toggleFavorite={toggleFavorite}
-            onViewDetails={setSelectedProperty}
+            onViewDetails={handleViewPropertyDetails}
             onOpenCustomRequest={() => setIsCustomRequestOpen(true)}
             onOpenSiteVisit={() => setIsSiteVisitBookingOpen(true)}
+            onOpenTalkToExpert={(prop) => {
+              setTalkToExpertProperty(prop);
+              setIsTalkToExpertOpen(true);
+            }}
             setBookingTargetProperty={setBookingTargetProperty}
             searchCategories={searchCategories}
             siteSettings={siteSettings}
@@ -1573,11 +2128,33 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'PropertyDetail' && (
+          <PremiumPropertyDetailView
+            property={selectedProperty}
+            properties={properties}
+            onBack={() => {
+              setSelectedProperty(null);
+              setActiveTab('Properties');
+            }}
+            setActiveTab={setActiveTab}
+            favorites={favorites}
+            toggleFavorite={toggleFavorite}
+            onOpenCustomRequest={() => setIsCustomRequestOpen(true)}
+            onBookSiteVisit={(prop) => {
+              setBookingTargetProperty(prop);
+              setIsSiteVisitBookingOpen(true);
+            }}
+          />
+        )}
+
         {activeTab === 'Admin' && (
           authLoading ? (
-            <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-6">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mb-4"></div>
-              <p className="font-mono text-xs text-slate-400 uppercase tracking-wider">Verifying Portal Authentication Credentials...</p>
+            <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 space-y-6">
+              <Logo size="lg" hideText={false} />
+              <div className="flex flex-col items-center space-y-2">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#C89B3C]"></div>
+                <p className="font-mono text-[10px] text-slate-500 uppercase tracking-widest">Verifying Portal Authentication Credentials...</p>
+              </div>
             </div>
           ) : (
             // CRM dashboard view allows modifying listing stages and mock responses!
@@ -1587,8 +2164,10 @@ export default function App() {
             onAddRequirement={handleAddCustomRequirementStatus}
             mapSettings={mapSettings}
             heroBanners={heroBanners}
+            useFirebase={useFirebase}
+            setUseFirebase={setUseFirebase}
             onUpdateMapSettings={(newSettings) => {
-              firebaseService.saveMapSettings(newSettings);
+              unifiedDb.saveMapSettings(newSettings);
               setMapSettings(newSettings);
             }}
             onUpdateStatus={handleUpdateInquiryStatus}
@@ -1605,7 +2184,7 @@ export default function App() {
                 
                 const toDelete = oldIds.filter(id => !newIds.includes(id));
                 for (const id of toDelete) {
-                  await firebaseService.deleteProperty(id);
+                  await unifiedDb.deleteProperty(id);
                 }
 
                 const toSave = newProperties.filter(newP => {
@@ -1615,7 +2194,7 @@ export default function App() {
                 });
 
                 for (const p of toSave) {
-                  await firebaseService.saveProperty(p);
+                  await unifiedDb.saveProperty(p);
                 }
 
                 setProperties(newProperties);
@@ -1649,11 +2228,11 @@ export default function App() {
               const newIds = newCategories.map(c => c.id);
               oldIds.forEach(id => {
                 if (!newIds.includes(id)) {
-                  firebaseService.deleteCategory(id);
+                  unifiedDb.deleteCategory(id);
                 }
               });
               newCategories.forEach(cat => {
-                firebaseService.saveCategory(cat);
+                unifiedDb.saveCategory(cat);
               });
               setCategories(newCategories);
             }}
@@ -1663,11 +2242,11 @@ export default function App() {
               const newIds = newSearchCategories.map(c => c.id);
               oldIds.forEach(id => {
                 if (!newIds.includes(id)) {
-                  firebaseService.deleteSearchCategory(id);
+                  unifiedDb.deleteSearchCategory(id);
                 }
               });
               newSearchCategories.forEach(cat => {
-                firebaseService.saveSearchCategory(cat);
+                unifiedDb.saveSearchCategory(cat);
               });
               setSearchCategories(newSearchCategories);
             }}
@@ -1677,12 +2256,11 @@ export default function App() {
               const newIds = newAgents.map(a => a.id);
               oldIds.forEach(id => {
                 if (!newIds.includes(id)) {
-                  const path = `agents/${id}`;
-                  deleteDoc(doc(db, "agents", id)).catch(err => handleFirestoreError(err, OperationType.DELETE, path));
+                  unifiedDb.deleteAgent(id);
                 }
               });
               newAgents.forEach(ag => {
-                firebaseService.saveAgent(ag);
+                unifiedDb.saveAgent(ag);
               });
               setAgents(newAgents);
             }}
@@ -1692,12 +2270,11 @@ export default function App() {
               const newNames = Object.keys(newMapLocations);
               oldNames.forEach(name => {
                 if (!newNames.includes(name)) {
-                  const path = `map_locations/${name}`;
-                  deleteDoc(doc(db, "map_locations", name)).catch(err => handleFirestoreError(err, OperationType.DELETE, path));
+                  unifiedDb.deleteMapLocation(name);
                 }
               });
               newNames.forEach(name => {
-                firebaseService.saveMapLocation(newMapLocations[name]);
+                unifiedDb.saveMapLocation(newMapLocations[name]);
               });
               setMapLocations(newMapLocations);
             }}
@@ -1717,12 +2294,11 @@ export default function App() {
               const newIds = list.map(u => u.id);
               oldIds.forEach(id => {
                 if (!newIds.includes(id)) {
-                  const path = `admin_users/${id}`;
-                  deleteDoc(doc(db, "admin_users", id)).catch(err => handleFirestoreError(err, OperationType.DELETE, path));
+                  unifiedDb.deleteAdminUser(id);
                 }
               });
               list.forEach(u => {
-                firebaseService.saveAdminUser(u);
+                unifiedDb.saveAdminUser(u);
               });
               setAdminUsers(list);
             }}
@@ -1732,17 +2308,17 @@ export default function App() {
               const newIds = newFilters.map(f => f.id);
               oldIds.forEach(id => {
                 if (!newIds.includes(id)) {
-                  firebaseService.deleteQuickFilter(id);
+                  unifiedDb.deleteQuickFilter(id);
                 }
               });
               newFilters.forEach(f => {
-                firebaseService.saveQuickFilter(f);
+                unifiedDb.saveQuickFilter(f);
               });
               setQuickFilters(newFilters);
             }}
             siteSettings={siteSettings}
             setSiteSettings={(newSettings) => {
-              firebaseService.saveSiteSettings(newSettings);
+              unifiedDb.saveSiteSettings(newSettings);
               setSiteSettings(newSettings);
             }}
           />
@@ -1762,6 +2338,50 @@ export default function App() {
 
         {activeTab === 'Terms' && (
           <TermsConditionsView setActiveTab={setActiveTab} />
+        )}
+
+        {activeTab === '404' && (
+          <div className="min-h-screen bg-[#071322] flex flex-col items-center justify-center text-center px-6 py-24 select-none relative overflow-hidden">
+            <div className="absolute top-0 left-1/4 w-[400px] h-[400px] bg-[#FF8C00]/5 rounded-full blur-[100px] pointer-events-none" />
+            <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-red-500/5 rounded-full blur-[100px] pointer-events-none" />
+            
+            <div className="relative z-10 max-w-lg space-y-8">
+              <div className="inline-flex items-center justify-center p-4 bg-[#FF8C00]/10 rounded-full text-[#FF8C00] animate-bounce">
+                <XCircle className="w-16 h-16" strokeWidth={1.5} />
+              </div>
+              
+              <div className="space-y-3">
+                <h1 className="text-7xl font-sans font-black text-white tracking-tighter">404</h1>
+                <h2 className="text-xl font-sans font-semibold text-slate-200 tracking-tight">Property or Page Not Found</h2>
+                <p className="text-slate-400 text-xs font-light leading-relaxed max-w-sm mx-auto">
+                  The real estate listing, compliance form, or advisory resource you are searching for is unavailable or has been relocated.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
+                <button
+                  onClick={() => {
+                    setActiveTab('Home');
+                    window.history.pushState(null, '', '/');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-6 py-3 bg-gradient-to-r from-[#FF8C00] to-[#FF5A3C] hover:from-[#ff961f] hover:to-[#ff6d51] text-white text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all duration-300 shadow-md cursor-pointer"
+                >
+                  Return to Homepage
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab('Properties');
+                    window.history.pushState(null, '', '/properties');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-6 py-3 border border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all duration-300 cursor-pointer"
+                >
+                  Explore Properties
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {activeTab === 'Insights' && (
@@ -1957,28 +2577,32 @@ export default function App() {
       </main>
 
       {/* FOOTER */}
-      <Footer 
-        activeTab={activeTab}
-        setActiveTab={setActiveTab} 
-        scrollToListings={scrollToListings} 
-        siteSettings={siteSettings}
-        onOpenCustomRequest={() => setIsCustomRequestOpen(true)}
-        setSearchFilter={setSearchFilter}
-      />
+      {activeTab !== 'Admin' && (
+        <Footer 
+          activeTab={activeTab}
+          setActiveTab={setActiveTab} 
+          scrollToListings={scrollToListings} 
+          siteSettings={siteSettings}
+          onOpenCustomRequest={() => setIsCustomRequestOpen(true)}
+          setSearchFilter={setSearchFilter}
+        />
+      )}
 
       {/* LIGHTBOX / MODALS */}
       
       {/* 1. Property Details focus Lightbox */}
-      <PropertyDetailModal
-        property={selectedProperty}
-        onClose={() => setSelectedProperty(null)}
-        onAddInquiry={handleAddConsultationInquiry}
-        onBookSiteVisit={(prop) => {
-          setBookingTargetProperty(prop);
-          setIsSiteVisitBookingOpen(true);
-          setSelectedProperty(null); // Hide detail popover
-        }}
-      />
+      {activeTab !== 'PropertyDetail' && (
+        <PropertyDetailModal
+          property={selectedProperty}
+          onClose={() => setSelectedProperty(null)}
+          onAddInquiry={handleAddConsultationInquiry}
+          onBookSiteVisit={(prop) => {
+            setBookingTargetProperty(prop);
+            setIsSiteVisitBookingOpen(true);
+            setSelectedProperty(null); // Hide detail popover
+          }}
+        />
+      )}
 
       {/* 2. Custom Requirement detailed registration form */}
       <CustomRequestModal
@@ -2005,13 +2629,28 @@ export default function App() {
         prefilledData={siteVisitPrefilled}
       />
 
+      {/* 2.6 Dedicated Talk to Expert inquiry form modal */}
+      <TalkToExpertModal
+        isOpen={isTalkToExpertOpen}
+        onClose={() => {
+          setIsTalkToExpertOpen(false);
+          setTalkToExpertProperty(null);
+        }}
+        selectedProperty={talkToExpertProperty}
+        onSubmitInquiry={(data) => {
+          handleAddTalkToExpertInquiry(data);
+          setIsTalkToExpertOpen(false);
+          setTalkToExpertProperty(null);
+        }}
+      />
+
       {/* 3. Favorites shortlisted properties slideout drawer */}
       <FavoritesDrawer
         isOpen={isFavoritesOpen}
         onClose={() => setIsFavoritesOpen(false)}
         favoritesList={favoritesList}
         onRemoveFavorite={toggleFavorite}
-        onViewProperty={setSelectedProperty}
+        onViewProperty={handleViewPropertyDetails}
         onClearAll={clearAllFavorites}
       />
 
@@ -2065,6 +2704,99 @@ export default function App() {
             </motion.div>
           ))}
         </AnimatePresence>
+      </div>
+
+      {/* 6. Prominent Floating Emergency DB Rollback Console */}
+      <div className="fixed bottom-6 left-6 z-[99] max-w-sm font-sans pointer-events-none">
+        <div className="pointer-events-auto">
+          <AnimatePresence>
+            {isDbConsoleOpen ? (
+              <motion.div
+                initial={{ opacity: 0, y: 20, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 20, scale: 0.9 }}
+                className="bg-slate-900 border border-amber-500/40 p-4 rounded-2xl shadow-xl w-72 space-y-3 text-left text-xs text-slate-100"
+              >
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center space-x-2">
+                    <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></div>
+                    <span className="font-extrabold text-[10px] uppercase tracking-widest text-slate-300 font-mono">DB Emergency HUD</span>
+                  </div>
+                  <button
+                    onClick={() => setIsDbConsoleOpen(false)}
+                    className="text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-widest font-mono">Connection Integrity</p>
+                  <p className="text-[11px] text-slate-200 leading-relaxed font-light">
+                    Switch entire application traffic flow between Hostinger MySQL and Firebase Firestore instantly.
+                  </p>
+                </div>
+
+                <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5 font-mono text-[10px]">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">PRIMARY (MySQL):</span>
+                    <span className={useFirebase ? "text-slate-400" : "text-emerald-400 font-bold"}>
+                      {useFirebase ? "STANDBY" : "CONNECTED"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">ROLLBACK (Firebase):</span>
+                    <span className={useFirebase ? "text-amber-400 font-bold animate-pulse" : "text-slate-400"}>
+                      {useFirebase ? "HOT ACTIVE" : "STANDBY"}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    const nextVal = !useFirebase;
+                    setUseFirebase(nextVal);
+                    // Add a toast
+                    const toastId = Date.now();
+                    setToasts(prev => [
+                      ...prev,
+                      {
+                        id: toastId,
+                        title: nextVal ? "Rollback Active" : "MySQL Connected",
+                        message: nextVal 
+                          ? "Switched primary data engine to Firebase Firestore." 
+                          : "Restored primary data engine to Hostinger MySQL Database.",
+                        isError: nextVal,
+                        category: "SYSTEM"
+                      }
+                    ]);
+                  }}
+                  className={`w-full py-2 px-3 rounded-lg font-bold font-mono text-[10px] uppercase tracking-wider transition-colors duration-250 cursor-pointer ${
+                    useFirebase 
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                      : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                  }`}
+                >
+                  {useFirebase ? "⚡ Switch to MySQL Primary" : "⚠️ Toggle Firebase Rollback"}
+                </button>
+              </motion.div>
+            ) : (
+              <motion.button
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                onClick={() => setIsDbConsoleOpen(true)}
+                className={`flex items-center space-x-2 py-2 px-3 rounded-full border shadow-lg transition-all duration-300 cursor-pointer text-[10px] font-bold font-mono uppercase tracking-widest ${
+                  useFirebase 
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 animate-pulse font-bold' 
+                    : 'bg-slate-900 text-slate-100 border-slate-700 hover:border-slate-500 font-bold'
+                }`}
+              >
+                <Shield className="h-3.5 w-3.5 text-[#C89B3C]" />
+                <span>DB Engine: {useFirebase ? "Rollback" : "MySQL"}</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
     </div>

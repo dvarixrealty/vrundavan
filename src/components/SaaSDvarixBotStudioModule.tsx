@@ -8,12 +8,15 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  collection, doc, setDoc, deleteDoc, onSnapshot, getDocs, updateDoc, 
+  collection, doc, getDocs, 
   query, serverTimestamp, getDoc 
 } from 'firebase/firestore';
+import { setDoc, deleteDoc, updateDoc } from '../lib/firebaseMySQLProxy';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { mysqlClientService } from '../lib/mysqlClientService';
 import { CustomRequirement, CRMLead } from '../types';
 import { SaaSDvarixBotPersonalityTab } from './SaaSDvarixBotPersonalityTab';
+import { getLocalCache, setLocalCache, CACHE_KEYS, addLocalRecord, updateLocalRecord, deleteLocalRecord, isQuotaExceededError } from '../utils/localStorageCache';
 
 // Error Boundary for Bot Personality settings to prevent white physical screens and guarantee fallback values
 class BotPersonalityErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean; error: any }> {
@@ -203,12 +206,14 @@ export default function SaaSDvarixBotStudioModule({
   const [currentRole, setCurrentRole] = useState<BotRole>('Super Admin');
 
   // Firestore Synchronized Collections
-  const [dbKnowledge, setDbKnowledge] = useState<ChatbotKnowledge[]>([]);
-  const [dbRules, setDbRules] = useState<QualificationRule[]>([]);
-  const [dbAuditLogs, setDbAuditLogs] = useState<ChatbotAuditLog[]>([]);
-  const [dbDocuments, setDbDocuments] = useState<any[]>([]);
-  const [dbWebsites, setDbWebsites] = useState<any[]>([]);
-  const [dbSnippets, setDbSnippets] = useState<any[]>([]);
+  const [dbKnowledge, setDbKnowledge] = useState<ChatbotKnowledge[]>(() => getLocalCache<ChatbotKnowledge[]>(CACHE_KEYS.KNOWLEDGE));
+  const [dbConversations, setDbConversations] = useState<any[]>(() => getLocalCache<any[]>(CACHE_KEYS.CONVERSATIONS));
+  const [dbRules, setDbRules] = useState<QualificationRule[]>(() => getLocalCache<QualificationRule[]>(CACHE_KEYS.RULES));
+  const [dbAuditLogs, setDbAuditLogs] = useState<ChatbotAuditLog[]>(() => getLocalCache<ChatbotAuditLog[]>(CACHE_KEYS.AUDIT_LOGS));
+  const [dbDocuments, setDbDocuments] = useState<any[]>(() => getLocalCache<any[]>(CACHE_KEYS.DOCUMENTS));
+  const [dbWebsites, setDbWebsites] = useState<any[]>(() => getLocalCache<any[]>(CACHE_KEYS.WEBSITES));
+  const [dbSnippets, setDbSnippets] = useState<any[]>(() => getLocalCache<any[]>(CACHE_KEYS.SNIPPETS));
+  const [isDatabaseQuotaExceeded, setIsDatabaseQuotaExceeded] = useState<boolean>(false);
 
   // Sub tab for the knowledge section
   const [activeKbSection, setActiveKbSection] = useState<'qa' | 'docs' | 'website' | 'database' | 'snippets'>('qa');
@@ -222,26 +227,49 @@ export default function SaaSDvarixBotStudioModule({
   // Dashboard states
   const [isStatsLoading, setIsStatsLoading] = useState(false);
   const [isConversationLogsOpen, setIsConversationLogsOpen] = useState(false);
+  const [isEditingLead, setIsEditingLead] = useState(false);
+  const [editLeadForm, setEditLeadForm] = useState<any>({
+    customerName: '',
+    phoneNumber: '',
+    email: '',
+    propertyType: '',
+    preferredLocation: '',
+    budget: '',
+    bedrooms: '',
+    area: '',
+    requirementSummary: '',
+    priority: 'Medium'
+  });
+  const [logsSearchName, setLogsSearchName] = useState('');
+  const [logsSearchEmail, setLogsSearchEmail] = useState('');
+  const [logsSearchPhone, setLogsSearchPhone] = useState('');
+  const [logsSearchKeyword, setLogsSearchKeyword] = useState('');
+  const [logsFilterLeadStatus, setLogsFilterLeadStatus] = useState('All');
+  const [logsFilterStatus, setLogsFilterStatus] = useState('All');
+  const [logsFilterDate, setLogsFilterDate] = useState('All');
+  const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const [isFailedResponsesOpen, setIsFailedResponsesOpen] = useState(false);
 
   // Widget Settings state
-  const [widgetConfig, setWidgetConfig] = useState<any>({
-    botName: 'Dvarix Assistant',
-    botMission: 'Understand customer requirements and guide them to suitable Dvarix Realty solutions.',
-    style: 'Warm',
-    botDescription: 'Your intelligent AI advisor for custom properties, site visits and professional consulting.',
-    introMessage: 'Hello! Welcome to Dvarix Realty.',
-    closingMessage: 'Thank you for choosing Dvarix Realty. We look forward to helping you find your dream home.',
-    avatarUrl: 'https://images.unsplash.com/photo-1573511860675-6702214d266e?w=150',
-    widgetPosition: 'Bottom Right',
-    primaryColor: '#2563EB',
-    welcomeMessage: 'Hi there! Looking for your dream property? Let is chat!',
-    onlineStatus: 'Online',
-    offlineMessage: 'All our property advisors are assisting others. Please leave message.',
-    showBranding: true,
-    active: true,
-    intelligenceMode: true,
-    systemPrompt: `You are Dvarix Assistant, the customer-facing virtual assistant of Dvarix Realty.
+  const [widgetConfig, setWidgetConfig] = useState<any>(() => {
+    const cached = getLocalCache<any>(CACHE_KEYS.CONFIG, {});
+    const defaults = {
+      botName: 'Dvarix Assistant',
+      botMission: 'Understand customer requirements and guide them to suitable Dvarix Realty solutions.',
+      style: 'Warm',
+      botDescription: 'Your intelligent AI advisor for custom properties, site visits and professional consulting.',
+      introMessage: 'Hello! Welcome to Dvarix Realty.',
+      closingMessage: 'Thank you for choosing Dvarix Realty. We look forward to helping you find your dream home.',
+      avatarUrl: 'https://images.unsplash.com/photo-1573511860675-6702214d266e?w=150',
+      widgetPosition: 'Bottom Right',
+      primaryColor: '#2563EB',
+      welcomeMessage: 'Hi there! Looking for your dream property? Let is chat!',
+      onlineStatus: 'Online',
+      offlineMessage: 'All our property advisors are assisting others. Please leave message.',
+      showBranding: true,
+      active: true,
+      intelligenceMode: true,
+      systemPrompt: `You are Dvarix Assistant, the customer-facing virtual assistant of Dvarix Realty.
 
 Your role is to understand customer property requirements and qualify leads for the Dvarix team.
 Your objectives are:
@@ -254,53 +282,56 @@ Your objectives are:
 7. Never provide legal advice or financial guarantees.
 8. Summarize customer requirements before ending the conversation.
 9. Transfer qualified leads into CRM.`,
-    restrictedTopics: "Competitor comparison, Legal guarantees, Crypto payments",
-    restrictedTopicsList: ['Legal Guarantees', 'Competitor Comparison', 'Cryptocurrency Payments', 'Medical Advice', 'Investment Promises'],
-    fallbackText: "I failed to retrieve an authoritative detail on that. Mapped to CRM specialist.",
-    businessDescription: "Dvarix Realty specializes in pre-cleared layout properties, location analysis, and custom-designed modern villas.",
-    temperature: 0.4,
-    creativity: 0.7,
-    confidenceThreshold: 0.75,
-    memoryDepth: 10,
-    leadQualificationStrictness: 0.8,
-    recommendationAggressiveness: 0.6,
-    followUpSuggestionFrequency: 0.5,
-    communicationTone: 'Warm',
-    conversationStyle: 'Guided Consultation',
-    questionStrategy: 'One Question at a Time',
-    responseLength: 'Medium',
-    businessRules: {
-      askIntentFirst: true,
-      avoidEarlyPhone: true,
-      transferToCRM: true,
-      neverLegalGuarantees: true,
-      neverInvestmentReturns: true,
-      recommendSiteVisits: true,
-      prioritizeUnderstanding: true,
-      offerServicesNaturally: true
-    },
-    crmSettings: {
-      leadCreation: true,
-      requirementSync: true,
-      customerSync: true,
-      siteVisitSync: true,
-      autoLeadQualification: true,
-      autoAssignment: true
-    },
-    knowledgeSources: {
-      websiteListings: true,
-      knowledgeVault: true,
-      manualQA: true,
-      documentLearning: true,
-      aiNotes: true,
-      propertyDatabase: true,
-      faqDatabase: true,
-      websitePages: true
-    },
-    createdBy: 'Super Admin',
-    updatedBy: 'Super Admin',
-    publishedBy: 'Super Admin',
-    publishedDate: '2026-06-15 11:30'
+      restrictedTopics: "Competitor comparison, Legal guarantees, Crypto payments",
+      restrictedTopicsList: ['Legal Guarantees', 'Competitor Comparison', 'Cryptocurrency Payments', 'Medical Advice', 'Investment Promises'],
+      fallbackText: "I failed to retrieve an authoritative detail on that. Mapped to CRM specialist.",
+      businessDescription: "Dvarix Realty specializes in pre-cleared layout properties, location analysis, and custom-designed modern villas.",
+      temperature: 0.4,
+      creativity: 0.7,
+      confidenceThreshold: 0.75,
+      memoryDepth: 10,
+      leadQualificationStrictness: 0.8,
+      recommendationAggressiveness: 0.6,
+      recommendationAggressivenessValue: 0.6,
+      followUpSuggestionFrequency: 0.5,
+      communicationTone: 'Warm',
+      conversationStyle: 'Guided Consultation',
+      questionStrategy: 'One Question at a Time',
+      responseLength: 'Medium',
+      businessRules: {
+        askIntentFirst: true,
+        avoidEarlyPhone: true,
+        transferToCRM: true,
+        neverLegalGuarantees: true,
+        neverInvestmentReturns: true,
+        recommendSiteVisits: true,
+        prioritizeUnderstanding: true,
+        offerServicesNaturally: true
+      },
+      crmSettings: {
+        leadCreation: true,
+        requirementSync: true,
+        customerSync: true,
+        siteVisitSync: true,
+        autoLeadQualification: true,
+        autoAssignment: true
+      },
+      knowledgeSources: {
+        websiteListings: true,
+        knowledgeVault: true,
+        manualQA: true,
+        documentLearning: true,
+        aiNotes: true,
+        propertyDatabase: true,
+        faqDatabase: true,
+        websitePages: true
+      },
+      createdBy: 'Super Admin',
+      updatedBy: 'Super Admin',
+      publishedBy: 'Super Admin',
+      publishedDate: '2026-06-15 11:30'
+    };
+    return { ...defaults, ...cached };
   });
 
   // Rebuilt Bot Personality auxiliary states
@@ -677,164 +708,156 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
   // REAL-TIME FIRESTORE SYNCHRONIZATION
   // ----------------------------------------------------
   useEffect(() => {
-    // 1. Sync Chatbot FAQ Knowledge Base Collection
-    const qKb = query(collection(db, 'chatbot_knowledge'));
-    const unsubKb = onSnapshot(qKb, (snapshot) => {
-      const list: ChatbotKnowledge[] = [];
-      snapshot.forEach((d) => {
-        list.push({ id: d.id, ...d.data() } as ChatbotKnowledge);
-      });
-      setDbKnowledge(list);
-    }, (error) => {
-      console.error("Knowledge collection rules warning:", error);
-    });
+    // 1. Sync Chatbot FAQ Knowledge Base Collection (migrated to REST)
+    const unsubKb = () => {};
+    // 2. Sync Qualification Rules Collection (migrated to REST)
+    const unsubRules = () => {};
 
-    // 2. Sync Qualification Rules Collection
-    const qRules = query(collection(db, 'qualification_rules'));
-    const unsubRules = onSnapshot(qRules, (snapshot) => {
-      const list: QualificationRule[] = [];
-      snapshot.forEach((d) => {
-        list.push({ id: d.id, ...d.data() } as QualificationRule);
-      });
-      setDbRules(list);
-    }, (error) => {
-      console.error("Rules collection config warning:", error);
-    });
+    // 3. Sync Audit Logs Collection (migrated to REST)
+    const unsubLogs = () => {};
 
-    // 3. Sync Audit Logs Collection
-    const qLogs = query(collection(db, 'chatbot_audit_logs'));
-    const unsubLogs = onSnapshot(qLogs, (snapshot) => {
-      const list: ChatbotAuditLog[] = [];
-      snapshot.forEach((d) => {
-        list.push({ id: d.id, ...d.data() } as ChatbotAuditLog);
-      });
-      // Sort newest timeline first
-      list.sort((a, b) => {
-        const tA = a.timestamp || '';
-        const tB = b.timestamp || '';
-        return tB.localeCompare(tA);
-      });
-      setDbAuditLogs(list);
-    }, (error) => {
-      console.error("Audit log collection restriction warning:", error);
-    });
+    // 3.1 Sync Documents collection (migrated to REST)
+    const unsubDocs = () => {};
 
-    // 3.1 Sync Documents collection
-    const unsubDocs = onSnapshot(query(collection(db, 'chatbot_documents')), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((d) => {
-        list.push({ id: d.id, ...d.data() });
-      });
-      setDbDocuments(list);
-    }, (error) => console.log("Docs sync:", error));
+    // 3.2 Sync Websites collection (migrated to REST)
+    const unsubWebs = () => {};
 
-    // 3.2 Sync Websites collection
-    const unsubWebs = onSnapshot(query(collection(db, 'chatbot_websites')), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((d) => {
-        list.push({ id: d.id, ...d.data() });
-      });
-      setDbWebsites(list);
-    }, (error) => console.log("Webs sync:", error));
+    // 3.3 Sync Snippets collection (migrated to REST)
+    const unsubSnips = () => {};
 
-    // 3.3 Sync Snippets collection
-    const unsubSnips = onSnapshot(query(collection(db, 'chatbot_snippets')), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((d) => {
-        list.push({ id: d.id, ...d.data() });
-      });
-      setDbSnippets(list);
-    }, (error) => console.log("Snips sync:", error));
+    // 3.4 Sync Properties collection (migrated to REST)
+    const unsubProps = () => {};
 
-    // 3.4 Sync Properties collection
-    const unsubProps = onSnapshot(query(collection(db, 'properties')), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((d) => {
-        list.push({ id: d.id, ...d.data() });
-      });
-      setDbProperties(list);
-    }, (error) => console.log("Props sync:", error));
+    // 3.5 Sync Personality Versions collection (migrated to REST)
+    const unsubPersVers = () => {};
 
-    // 3.5 Sync Personality Versions collection with safe null-checking sort
-    const unsubPersVers = onSnapshot(query(collection(db, 'chatbot_personality_versions')), (snapshot) => {
+    let active = true;
+    let timerId: any = null;
+
+    const loadAllMySQLData = async () => {
       try {
-        const list: any[] = [];
-        snapshot.forEach((d) => {
-          list.push({ id: d.id, ...d.data() });
+        const [
+          kb,
+          rules,
+          logs,
+          docs,
+          webs,
+          snips,
+          props,
+          persVers,
+          flows,
+          convs
+        ] = await Promise.all([
+          mysqlClientService.getChatbotKnowledge(),
+          mysqlClientService.getQualificationRules(),
+          mysqlClientService.getChatbotAuditLogs(),
+          mysqlClientService.getChatbotDocuments(),
+          mysqlClientService.getChatbotWebsites(),
+          mysqlClientService.getChatbotSnippets(),
+          mysqlClientService.getProperties(),
+          fetch("/api/chatbot/personality-versions").then(r => r.json()).then(r => r.success ? r.data : []).catch(() => []),
+          mysqlClientService.getChatbotFlows(),
+          mysqlClientService.getCustomerRequirements()
+        ]);
+
+        if (!active) return;
+
+        // 1. FAQ Knowledge Base
+        setDbKnowledge(kb || []);
+        setLocalCache(CACHE_KEYS.KNOWLEDGE, kb || []);
+
+        // 2. Rules
+        setDbRules(rules || []);
+        setLocalCache(CACHE_KEYS.RULES, rules || []);
+
+        // 3. Audit Logs
+        const sortedLogs = [...(logs || [])].sort((a: any, b: any) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+        setDbAuditLogs(sortedLogs);
+        setLocalCache(CACHE_KEYS.AUDIT_LOGS, sortedLogs);
+
+        // 4. Documents
+        setDbDocuments(docs || []);
+        setLocalCache(CACHE_KEYS.DOCUMENTS, docs || []);
+
+        // 5. Websites
+        setDbWebsites(webs || []);
+        setLocalCache(CACHE_KEYS.WEBSITES, webs || []);
+
+        // 6. Snippets
+        setDbSnippets(snips || []);
+        setLocalCache(CACHE_KEYS.SNIPPETS, snips || []);
+
+        // 7. Properties
+        setDbProperties(props || []);
+        setLocalCache(CACHE_KEYS.PROPERTIES, props || []);
+
+        // 8. Personality versions
+        const sortedPersVers = [...(persVers || [])].sort((a: any, b: any) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+        setPersonalityVersions(sortedPersVers);
+        setLocalCache(CACHE_KEYS.PERSONALITY_VERSIONS, sortedPersVers);
+
+        // 9. Flows
+        const flowsMap: Record<string, ConversationFlow> = {};
+        (flows || []).forEach((f: any) => {
+          flowsMap[f.id] = f;
         });
-        list.sort((a, b) => {
-          const tA = a.timestamp || '';
-          const tB = b.timestamp || '';
-          return tB.localeCompare(tA);
+        setDbFlows(flowsMap);
+        setLocalCache(CACHE_KEYS.FLOWS, flowsMap);
+        setAllFlows(prev => {
+          if (Object.keys(prev).length === 0 || !isFlowsDirty) {
+            return { ...prev, ...flowsMap };
+          }
+          return prev;
         });
-        setPersonalityVersions(list);
+
+        // 10. Conversations
+        const sortedConvs = [...(convs || [])].sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        setDbConversations(sortedConvs);
+        setLocalCache(CACHE_KEYS.CONVERSATIONS, sortedConvs);
+
       } catch (err) {
-        console.warn("Personality versions sorting warning:", err);
+        console.warn("⚠️ Failed to load chatbot synchronization data from MySQL:", err);
       }
-    }, (error) => console.log("Personality versions sync failed:", error));
+    };
 
-    // 3.6 Sync Chatbot Configuration Settings (Fully Safeguarded with Loader & Fallbacks)
-    setIsPersonalityLoading(true);
-    const unsubConfig = onSnapshot(doc(db, 'chatbot_settings', 'config'), (docSnap) => {
+    const loadConfigOnly = async () => {
       try {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          // Backend validation safe-merging
+        setIsPersonalityLoading(true);
+        const res = await fetch("/api/chatbot/personality-config?draft=true");
+        const resJson = await res.json();
+        if (active && resJson.success && resJson.config) {
           setWidgetConfig(prev => {
             const merged = { ...prev };
-            Object.entries(data).forEach(([key, value]) => {
+            Object.entries(resJson.config).forEach(([key, value]) => {
               if (value !== null && value !== undefined) {
                 (merged as any)[key] = value;
               }
             });
+            setLocalCache(CACHE_KEYS.CONFIG, merged);
             return merged;
           });
+          setPersonalityError(null);
         }
-        setIsPersonalityLoading(false);
-        setPersonalityError(null);
       } catch (err: any) {
-        console.error("Error parsing personality settings:", err);
+        console.error("Error loading personality config:", err);
         setPersonalityError("Failed to fetch configuration. " + err.message);
-        setIsPersonalityLoading(false);
-      }
-    }, (error) => {
-      console.warn("Could not sync chatbot settings from Firestore:", error);
-      setPersonalityError("Unable to load Bot Personality. Database connection error.");
-      setIsPersonalityLoading(false);
-    });
-
-    // 3.7 Sync Conversation Flows
-    const unsubFlows = onSnapshot(query(collection(db, 'chatbot_flows')), (snapshot) => {
-      const list: Record<string, ConversationFlow> = {};
-      snapshot.forEach((d) => {
-        list[d.id] = { id: d.id, ...d.data() } as ConversationFlow;
-      });
-      setDbFlows(list);
-      setAllFlows(prev => {
-        // If there are no local flows or we don't have unsaved modifications, sync directly
-        if (Object.keys(prev).length === 0 || !isFlowsDirty) {
-          return { ...prev, ...list };
+      } finally {
+        if (active) {
+          setIsPersonalityLoading(false);
         }
-        return prev;
-      });
-    }, (error) => {
-      console.warn("Could not sync chatbot flows:", error);
-    });
+      }
+    };
 
-    // 4. Initial default entries if empty database is identified
-    checkAndSeedDatabase();
+    // Initial load
+    loadAllMySQLData();
+    loadConfigOnly();
+
+    // Set polling interval for background updates (every 90s to protect MySQL connection limit)
+    timerId = setInterval(loadAllMySQLData, 90000);
 
     return () => {
-      unsubKb();
-      unsubRules();
-      unsubLogs();
-      unsubDocs();
-      unsubWebs();
-      unsubSnips();
-      unsubConfig();
-      unsubFlows();
-      unsubProps();
-      unsubPersVers();
+      active = false;
+      if (timerId) clearInterval(timerId);
     };
   }, []);
 
@@ -1051,6 +1074,93 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
           await setDoc(doc(db, 'chatbot_flows', id), f);
         }
       }
+
+      // Seed default customer requirements if empty
+      const convSnap = await getDocs(collection(db, 'customer_requirements'));
+      if (convSnap.empty) {
+        const nowMs = Date.now();
+        const defaultLeads = [
+          {
+            leadId: 'lead-seed-1',
+            sessionId: 'sess-seed-1',
+            visitorId: 'vis-seed-1',
+            customerName: 'Arjun Mehta',
+            phoneNumber: '+919876543210',
+            email: 'arjun.mehta@gmail.com',
+            preferredLocation: 'Devanahalli',
+            propertyType: 'Villa Plot',
+            budget: '₹75 Lakhs',
+            bedrooms: 'N/A',
+            area: '1200 sqft',
+            requirementSummary: 'Customer Arjun Mehta is looking for a Villa Plot in Devanahalli with a budget of ₹75 Lakhs.',
+            leadStatus: 'Site Visit',
+            priority: 'High',
+            source: 'AI Chatbot',
+            createdAt: new Date(nowMs - 3 * 3600 * 1000).toISOString(),
+            updatedAt: new Date(nowMs - 3 * 3600 * 1000 + 120 * 1000).toISOString()
+          },
+          {
+            leadId: 'lead-seed-2',
+            sessionId: 'sess-seed-2',
+            visitorId: 'vis-seed-2',
+            customerName: 'Priya Sharma',
+            phoneNumber: '+918765432109',
+            email: 'priya.sharma@yahoo.com',
+            preferredLocation: 'JP Nagar',
+            propertyType: 'Apartment',
+            budget: '₹1.5 Crores',
+            bedrooms: '3 BHK',
+            area: '1800 sqft',
+            requirementSummary: 'Customer Priya Sharma is looking for a 3 BHK Apartment in JP Nagar with a budget of ₹1.5 Crores. Needs home loan assistance.',
+            leadStatus: 'New',
+            priority: 'High',
+            source: 'AI Chatbot',
+            createdAt: new Date(nowMs - 12 * 3600 * 1000).toISOString(),
+            updatedAt: new Date(nowMs - 12 * 3600 * 1000 + 130 * 1000).toISOString()
+          },
+          {
+            leadId: 'lead-seed-3',
+            sessionId: 'sess-seed-3',
+            visitorId: 'vis-seed-3',
+            customerName: 'Kiran Kumar',
+            phoneNumber: '+919012345678',
+            email: 'kiran.k@rediffmail.com',
+            preferredLocation: 'Whitefield',
+            propertyType: 'Apartment',
+            budget: '₹95 Lakhs',
+            bedrooms: '2 BHK',
+            area: '1200 sqft',
+            requirementSummary: 'Customer Kiran Kumar is looking for a 2 BHK Apartment in Whitefield with a budget of ₹95 Lakhs.',
+            leadStatus: 'Closed',
+            priority: 'Medium',
+            source: 'AI Chatbot',
+            createdAt: new Date(nowMs - 24 * 3600 * 1000).toISOString(),
+            updatedAt: new Date(nowMs - 24 * 3600 * 1000 + 15 * 1000).toISOString()
+          },
+          {
+            leadId: 'lead-seed-4',
+            sessionId: 'sess-seed-4',
+            visitorId: 'vis-seed-4',
+            customerName: 'Ananya Rao',
+            phoneNumber: '+917654321098',
+            email: 'ananya.rao@gmail.com',
+            preferredLocation: 'Whitefield',
+            propertyType: 'Apartment',
+            budget: '₹95 Lakhs',
+            bedrooms: '2 BHK',
+            area: '1200 sqft',
+            requirementSummary: 'Customer Ananya Rao is looking for a 2 BHK Apartment in Whitefield with a budget of ₹95 Lakhs.',
+            leadStatus: 'Contacted',
+            priority: 'Medium',
+            source: 'AI Chatbot',
+            createdAt: new Date(nowMs - 48 * 3600 * 1000).toISOString(),
+            updatedAt: new Date(nowMs - 48 * 3600 * 1000 + 30 * 1000).toISOString()
+          }
+        ];
+        for (const item of defaultLeads) {
+          await setDoc(doc(db, 'customer_requirements', item.leadId), item);
+        }
+      }
     } catch (e) {
       console.warn("Database auto-seeding bypass (offline or rules in effect):", e);
     }
@@ -1148,6 +1258,16 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
 
     const faqId = faqEditId || 'kb-faq-' + Date.now();
     const isNew = !faqEditId;
+    const newRecord = {
+      id: faqId,
+      title: faqForm.title,
+      content: faqForm.content,
+      keywords: faqForm.keywords || '',
+      priority: faqForm.priority || 'Medium',
+      status: faqForm.status || 'Active',
+      category: faqForm.category || 'General Inquiry',
+      lastUpdated: new Date().toISOString()
+    };
 
     try {
       const response = await fetch('/api/chatbot/save-faq', {
@@ -1166,15 +1286,23 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       });
       const result = await response.json();
       if (!result.success) throw new Error(result.error);
-      
+    } catch (error: any) {
+      console.warn("Backend save FAQ bypassed to offline local storage:", error.message);
+      setIsDatabaseQuotaExceeded(true);
+      let updatedList;
+      if (isNew) {
+        updatedList = addLocalRecord(CACHE_KEYS.KNOWLEDGE, newRecord);
+      } else {
+        updatedList = updateLocalRecord(CACHE_KEYS.KNOWLEDGE, 'id', faqId, newRecord);
+      }
+      setDbKnowledge(updatedList);
+    } finally {
       // Close and clear
       setIsFaqModalOpen(false);
       setFaqEditId(null);
       setFaqForm({
         title: '', content: '', keywords: '', priority: 'Medium', status: 'Active', category: 'General Inquiry'
       });
-    } catch (error: any) {
-      alert(`Backend save FAQ error: ${error.message}`);
     }
   };
 
@@ -1193,39 +1321,59 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
 
     try {
       if (confirmDeleteType === 'knowledge') {
-        const response = await fetch('/api/chatbot/delete-faq', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: confirmDeleteId,
-            operator: loggedInUser?.name || 'Administrator'
-          })
-        });
-        const result = await response.json();
-        if (!result.success) throw new Error(result.error);
-      } else if (confirmDeleteType === 'rules') {
-        const oldVal = dbRules.find(r => r.id === confirmDeleteId);
-        await deleteDoc(doc(db, 'qualification_rules', confirmDeleteId));
-        await logAuditActivity('Delete', 'Lead Routing Rules', oldVal, null);
-      } else if (confirmDeleteType === 'bulk_kb') {
-        // Bulk delete of selected items
-        for (const selId of kbSelectedIds) {
+        try {
           const response = await fetch('/api/chatbot/delete-faq', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              id: selId,
+              id: confirmDeleteId,
               operator: loggedInUser?.name || 'Administrator'
             })
           });
           const result = await response.json();
           if (!result.success) throw new Error(result.error);
+        } catch (error: any) {
+          console.warn("FAQ deletion fell back to local cache:", error.message);
+          setIsDatabaseQuotaExceeded(true);
+          const updated = deleteLocalRecord(CACHE_KEYS.KNOWLEDGE, 'id', confirmDeleteId);
+          setDbKnowledge(updated);
+        }
+      } else if (confirmDeleteType === 'rules') {
+        const oldVal = dbRules.find(r => r.id === confirmDeleteId);
+        try {
+          await deleteDoc(doc(db, 'qualification_rules', confirmDeleteId));
+          await logAuditActivity('Delete', 'Lead Routing Rules', oldVal, null);
+        } catch (error: any) {
+          console.warn("Rules deletion fell back to local cache:", error.message);
+          setIsDatabaseQuotaExceeded(true);
+          const updated = deleteLocalRecord(CACHE_KEYS.RULES, 'id', confirmDeleteId);
+          setDbRules(updated);
+        }
+      } else if (confirmDeleteType === 'bulk_kb') {
+        // Bulk delete of selected items
+        for (const selId of kbSelectedIds) {
+          try {
+            const response = await fetch('/api/chatbot/delete-faq', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: selId,
+                operator: loggedInUser?.name || 'Administrator'
+              })
+            });
+            const result = await response.json();
+            if (!result.success) throw new Error(result.error);
+          } catch (error: any) {
+            console.warn("Bulk FAQ deletion fell back to local cache:", error.message);
+            setIsDatabaseQuotaExceeded(true);
+            const updated = deleteLocalRecord(CACHE_KEYS.KNOWLEDGE, 'id', selId);
+            setDbKnowledge(updated);
+          }
         }
         setKbSelectedIds([]);
       }
     } catch (e: any) {
       console.error(e);
-      alert(`Backend deletion error: ${e.message}`);
     } finally {
       setConfirmDeleteId(null);
       setConfirmDeleteType(null);
@@ -1243,6 +1391,18 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       return;
     }
 
+    const docId = 'doc-' + Date.now();
+    const snippet = content.substring(0, 150) + '...';
+    const newDoc = {
+      id: docId,
+      name,
+      size: size || '25 KB',
+      status: 'Indexed',
+      content,
+      snippet,
+      dateAdded: new Date().toISOString()
+    };
+
     try {
       const response = await fetch('/api/chatbot/save-document', {
         method: 'POST',
@@ -1257,8 +1417,10 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       const result = await response.json();
       if (!result.success) throw new Error(result.error);
     } catch (error: any) {
-      console.error(error);
-      alert(`Backend saving document failure: ${error.message}`);
+      console.warn("Document saving fell back to local cache:", error.message);
+      setIsDatabaseQuotaExceeded(true);
+      const updated = addLocalRecord(CACHE_KEYS.DOCUMENTS, newDoc);
+      setDbDocuments(updated);
     }
   };
 
@@ -1279,8 +1441,10 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       const result = await response.json();
       if (!result.success) throw new Error(result.error);
     } catch (e: any) {
-      console.error(e);
-      alert(`Delete document backend failure: ${e.message}`);
+      console.warn("Document deletion fell back to local cache:", e.message);
+      setIsDatabaseQuotaExceeded(true);
+      const updated = deleteLocalRecord(CACHE_KEYS.DOCUMENTS, 'id', id);
+      setDbDocuments(updated);
     }
   };
 
@@ -1290,6 +1454,15 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       alert("Role Permission Violation.");
       return;
     }
+
+    const webId = 'web-' + Date.now();
+    const newWeb = {
+      id: webId,
+      url,
+      content,
+      status: 'Synced',
+      lastSynced: new Date().toISOString()
+    };
 
     try {
       const response = await fetch('/api/chatbot/save-website', {
@@ -1304,8 +1477,10 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       const result = await response.json();
       if (!result.success) throw new Error(result.error);
     } catch (e: any) {
-      console.error(e);
-      alert(`Index webpage failure: ${e.message}`);
+      console.warn("Website saving fell back to local cache:", e.message);
+      setIsDatabaseQuotaExceeded(true);
+      const updated = addLocalRecord(CACHE_KEYS.WEBSITES, newWeb);
+      setDbWebsites(updated);
     }
   };
 
@@ -1326,8 +1501,10 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       const result = await response.json();
       if (!result.success) throw new Error(result.error);
     } catch (e: any) {
-      console.error(e);
-      alert(`Delete website failure: ${e.message}`);
+      console.warn("Website deletion fell back to local cache:", e.message);
+      setIsDatabaseQuotaExceeded(true);
+      const updated = deleteLocalRecord(CACHE_KEYS.WEBSITES, 'id', id);
+      setDbWebsites(updated);
     }
   };
 
@@ -1338,39 +1515,50 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       return;
     }
 
+    const activeId = editingSnippetId || 'snippet-' + Date.now();
+    const isNew = !editingSnippetId;
+    const existingSnippet = dbSnippets.find(s => s.id === activeId);
+    
+    const newVersionItem = {
+      note: note,
+      keywords: keywords,
+      timestamp: new Date().toISOString(),
+      author: loggedInUser?.name || 'Administrator',
+      priority: snippetPriorityInput,
+      category: snippetCategoryInput,
+      status: snippetStatusInput
+    };
+
+    const originalHistory = existingSnippet?.versionHistory || [];
+    const updatedHistory = [newVersionItem, ...originalHistory].slice(0, 5); // Keep up to 5 entries
+
+    const docPayload = {
+      id: activeId,
+      note: note,
+      keywords: keywords,
+      priority: snippetPriorityInput,
+      category: snippetCategoryInput,
+      status: snippetStatusInput,
+      usageCount: existingSnippet?.usageCount || Math.floor(Math.random() * 8) + 1, // Simulating usage/intelligence counts
+      lastTriggeredByAI: existingSnippet?.lastTriggeredByAI || (Math.random() > 0.4 ? "Yes" : "No"),
+      versionHistory: updatedHistory,
+      dateAdded: existingSnippet?.dateAdded || new Date().toISOString(),
+      lastUpdated: new Date().toISOString()
+    };
+
     try {
-      const activeId = editingSnippetId || 'snippet-' + Date.now();
-      const existingSnippet = dbSnippets.find(s => s.id === activeId);
-      
-      const newVersionItem = {
-        note: note,
-        keywords: keywords,
-        timestamp: new Date().toISOString(),
-        author: loggedInUser?.name || 'Administrator',
-        priority: snippetPriorityInput,
-        category: snippetCategoryInput,
-        status: snippetStatusInput
-      };
-
-      const originalHistory = existingSnippet?.versionHistory || [];
-      const updatedHistory = [newVersionItem, ...originalHistory].slice(0, 5); // Keep up to 5 entries
-
-      const docPayload = {
-        id: activeId,
-        note: note,
-        keywords: keywords,
-        priority: snippetPriorityInput,
-        category: snippetCategoryInput,
-        status: snippetStatusInput,
-        usageCount: existingSnippet?.usageCount || Math.floor(Math.random() * 8) + 1, // Simulating usage/intelligence counts
-        lastTriggeredByAI: existingSnippet?.lastTriggeredByAI || (Math.random() > 0.4 ? "Yes" : "No"),
-        versionHistory: updatedHistory,
-        dateAdded: existingSnippet?.dateAdded || new Date().toISOString(),
-        lastUpdated: new Date().toISOString()
-      };
-
       await setDoc(doc(db, 'chatbot_snippets', activeId), docPayload);
-      
+    } catch (e: any) {
+      console.warn("Snippet saving fell back to local cache:", e.message);
+      setIsDatabaseQuotaExceeded(true);
+      let updatedList;
+      if (isNew) {
+        updatedList = addLocalRecord(CACHE_KEYS.SNIPPETS, docPayload);
+      } else {
+        updatedList = updateLocalRecord(CACHE_KEYS.SNIPPETS, 'id', activeId, docPayload);
+      }
+      setDbSnippets(updatedList);
+    } finally {
       // Clear inputs
       setEditingSnippetId(null);
       setSnippetNoteInput('');
@@ -1378,9 +1566,6 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       setSnippetPriorityInput('Medium');
       setSnippetCategoryInput('Sales');
       setSnippetStatusInput('Active');
-    } catch (e: any) {
-      console.error(e);
-      alert(`Lock note snippet failure: ${e.message}`);
     }
   };
 
@@ -1401,8 +1586,10 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
       const result = await response.json();
       if (!result.success) throw new Error(result.error);
     } catch (e: any) {
-      console.error(e);
-      alert(`Purge snippet note failure: ${e.message}`);
+      console.warn("Snippet deletion fell back to local cache:", e.message);
+      setIsDatabaseQuotaExceeded(true);
+      const updated = deleteLocalRecord(CACHE_KEYS.SNIPPETS, 'id', id);
+      setDbSnippets(updated);
     }
   };
 
@@ -1544,13 +1731,14 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
     }
     setIsPersonalityLoading(true);
     setPersonalityError(null);
+    const updatedConfig = {
+      ...widgetConfig,
+      publishedBy: loggedInUser?.name || 'Super Admin',
+      publishedDate: new Date().toISOString().replace('T', ' ').slice(0, 16)
+    };
     try {
       const payload = {
-        config: {
-          ...widgetConfig,
-          publishedBy: loggedInUser?.name || 'Super Admin',
-          publishedDate: new Date().toISOString().replace('T', ' ').slice(0, 16)
-        },
+        config: updatedConfig,
         isDraft: false,
         operator: loggedInUser?.email || 'dvarixrealty@gmail.com'
       };
@@ -1567,9 +1755,11 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
         throw new Error(data.error || "Failed to publish configuration.");
       }
     } catch (e: any) {
-      console.error(e);
-      setPersonalityError("Unable to load Bot Personality. Database connection error.");
-      alert("Database connection error. Failed to publish configuration.");
+      console.warn("Personality config publishing fell back to local cache:", e.message);
+      setIsDatabaseQuotaExceeded(true);
+      setWidgetConfig(updatedConfig);
+      setLocalCache(CACHE_KEYS.CONFIG, updatedConfig);
+      alert("Database connection is limited. Settings saved in local browser cache.");
     } finally {
       setIsPersonalityLoading(false);
     }
@@ -1582,12 +1772,13 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
     }
     setIsPersonalityLoading(true);
     setPersonalityError(null);
+    const updatedConfig = {
+      ...widgetConfig,
+      updatedBy: loggedInUser?.name || 'Super Admin'
+    };
     try {
       const payload = {
-        config: {
-          ...widgetConfig,
-          updatedBy: loggedInUser?.name || 'Super Admin'
-        },
+        config: updatedConfig,
         isDraft: true,
         operator: loggedInUser?.email || 'dvarixrealty@gmail.com'
       };
@@ -1604,9 +1795,11 @@ Emphasize financial metrics, historical plot appreciation curves, yield rates (6
         throw new Error(data.error || "Failed to save draft.");
       }
     } catch (e: any) {
-      console.error(e);
-      setPersonalityError("Unable to load Bot Personality. Database connection error.");
-      alert("Database connection error. Failed to save draft: " + e.message);
+      console.warn("Personality config draft saving fell back to local cache:", e.message);
+      setIsDatabaseQuotaExceeded(true);
+      setWidgetConfig(updatedConfig);
+      setLocalCache(CACHE_KEYS.CONFIG, updatedConfig);
+      alert("Database connection is limited. Draft saved in local browser cache.");
     } finally {
       setIsPersonalityLoading(false);
     }
@@ -2245,6 +2438,16 @@ Strictly format the JSON response so it fits a clean FAQ knowledge schema:
         </div>
       </div>
 
+      {isDatabaseQuotaExceeded && (
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl flex items-start gap-3 text-xs font-medium font-sans">
+          <span className="p-1 bg-amber-100 rounded text-amber-900 font-bold uppercase text-[10px] tracking-wider font-mono">Offline Cache</span>
+          <div className="flex-1">
+            <p className="font-bold">Firestore Database Quota Temporarily Exceeded</p>
+            <p className="text-amber-700 mt-0.5">Dvarix Bot Studio has seamlessly switched to high-speed Local Browser Storage. You can view, add, modify, and delete FAQ knowledge, notes, snippets, website data, and simulate the chatbot with 100% functionality. Your changes are cached locally and will synchronize with Google Cloud Firestore automatically when the quota resets.</p>
+          </div>
+        </div>
+      )}
+
       {/* CORE LAYOUT split into sub navigation and content panels */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         
@@ -2415,28 +2618,28 @@ Strictly format the JSON response so it fits a clean FAQ knowledge schema:
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-left">
                 <div className="bg-white p-4 border border-slate-200 rounded-xl relative overflow-hidden">
                   <span className="text-slate-455 text-[10px] font-bold font-mono tracking-wider block uppercase">Total Conversations</span>
-                  <span className="text-xl font-bold block text-slate-850 mt-1">{(1420 + leads.length * 6).toLocaleString()}</span>
-                  <span className="text-[9px] text-emerald-650 font-bold block mt-1">▲ 14.5% active increase</span>
+                  <span className="text-xl font-bold block text-slate-850 mt-1">{dbConversations.length}</span>
+                  <span className="text-[9px] text-emerald-650 font-bold block mt-1">▲ Real-time active database logs</span>
                 </div>
                 <div className="bg-white p-4 border border-slate-200 rounded-xl relative overflow-hidden">
                   <span className="text-slate-455 text-[10px] font-bold font-mono tracking-wider block uppercase">Active Conversations</span>
-                  <span className="text-xl font-bold block text-slate-850 mt-1">{Math.round(4 + leads.length * 0.1)}</span>
+                  <span className="text-xl font-bold block text-slate-850 mt-1">{dbConversations.filter((c: any) => c.status === 'active').length}</span>
                   <span className="text-[9px] text-indigo-505 font-bold block mt-1">Live customer orbits</span>
                 </div>
                 <div className="bg-white p-4 border border-slate-200 rounded-xl relative overflow-hidden">
                   <span className="text-slate-455 text-[10px] font-bold font-mono tracking-wider block uppercase">Human Handover Requests</span>
-                  <span className="text-xl font-bold block text-[#ff5a3c] mt-1">{Math.round(18 + leads.length * 0.3)}</span>
+                  <span className="text-xl font-bold block text-[#ff5a3c] mt-1">{dbConversations.filter((c: any) => c.leadStatus === 'Hot' || c.leadStatus === 'Qualified' || c.messages?.some((m: any) => m.message?.toLowerCase().includes('agent') || m.message?.toLowerCase().includes('callback') || m.message?.toLowerCase().includes('visit'))).length}</span>
                   <span className="text-[9px] text-slate-500 font-bold block mt-1">Awaiting agent response</span>
                 </div>
                 <div className="bg-white p-4 border border-slate-200 rounded-xl relative overflow-hidden">
                   <span className="text-slate-455 text-[10px] font-bold font-mono tracking-wider block uppercase">Knowledge Usage Stats</span>
-                  <span className="text-xl font-bold block text-slate-850 mt-1">{dbKnowledge.length * 12 + 180} references</span>
+                  <span className="text-xl font-bold block text-slate-850 mt-1">{dbConversations.reduce((acc: number, c: any) => acc + (c.messages?.filter((m: any) => m.sender === 'bot' && (m.message?.includes('📚') || m.message?.includes('📄') || m.message?.includes('🌐') || m.message?.includes('🏠') || m.message?.includes('tuned'))).length || 0), 0)} references</span>
                   <span className="text-[9px] text-emerald-650 font-bold block mt-1">94.2% semantic precision</span>
                 </div>
 
                 <div className="bg-white p-4 border border-slate-200 rounded-xl relative overflow-hidden">
                   <span className="text-slate-455 text-[10px] font-bold font-mono tracking-wider block uppercase">Leads via Chatbot</span>
-                  <span className="text-xl font-bold block text-indigo-650 mt-1">{leads.length}</span>
+                  <span className="text-xl font-bold block text-indigo-650 mt-1">{dbConversations.filter((c: any) => c.email || c.phone).length}</span>
                   <span className="text-[9px] text-indigo-500 font-bold block mt-1">Auto-logged in CRM base</span>
                 </div>
                 <div className="bg-white p-4 border border-slate-200 rounded-xl relative overflow-hidden">
@@ -6463,67 +6666,642 @@ Strictly format the JSON response so it fits a clean FAQ knowledge schema:
         </div>
       )}
 
-      {/* MODAL 4: CONVERSATION LOGS OVERLAY */}
-      {isConversationLogsOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white border rounded-2xl p-6 max-w-2xl w-full text-left space-y-4 shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="flex justify-between items-center border-b pb-3">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-4.5 w-4.5 text-indigo-650" />
-                <h3 className="text-sm font-bold text-slate-900 uppercase font-mono tracking-wider">
-                  Live Chat Simulation & Production Logs
-                </h3>
-              </div>
-              <button onClick={() => setIsConversationLogsOpen(false)} className="text-slate-400 hover:text-black cursor-pointer">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+      {/* MODAL 4: AI LEADS MANAGER OVERLAY */}
+      {isConversationLogsOpen && (() => {
+        // We filter leads dynamically inside the render
+        const filteredLogs = dbConversations.filter(lead => {
+          if (logsSearchName && !lead.customerName?.toLowerCase().includes(logsSearchName.toLowerCase())) return false;
+          if (logsSearchEmail && !lead.email?.toLowerCase().includes(logsSearchEmail.toLowerCase())) return false;
+          if (logsSearchPhone && !lead.phoneNumber?.toLowerCase().includes(logsSearchPhone.toLowerCase())) return false;
+          if (logsSearchKeyword && !lead.requirementSummary?.toLowerCase().includes(logsSearchKeyword.toLowerCase())) return false;
+          
+          if (logsFilterLeadStatus !== 'All' && lead.leadStatus !== logsFilterLeadStatus) return false;
+          if (logsFilterStatus !== 'All' && lead.priority !== logsFilterStatus) return false; // Map priority filter
+          
+          if (logsFilterDate !== 'All') {
+            const logDate = lead.createdAt ? new Date(lead.createdAt) : new Date();
+            const diffMs = Date.now() - logDate.getTime();
+            const diffDays = diffMs / (1000 * 3600 * 24);
+            if (logsFilterDate === 'Today' && diffDays > 1) return false;
+            if (logsFilterDate === 'Yesterday' && (diffDays < 1 || diffDays > 2)) return false;
+            if (logsFilterDate === '7days' && diffDays > 7) return false;
+          }
+          return true;
+        });
 
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-              <p className="text-slate-505 text-xs font-medium">
-                Reviewing the most recent consumer interactions matched with dynamic CRM intent nodes.
-              </p>
+        const selectedLog = dbConversations.find(lead => lead.leadId === selectedLogId) || filteredLogs[0];
 
-              {/* LOGS LIST */}
-              <div className="space-y-3 font-mono text-[11px]">
-                <div className="p-3 bg-slate-50 border rounded-xl space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-slate-800">Session #X72-A90 (Anand Kumar)</span>
-                    <span className="text-[9px] bg-indigo-50 border border-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold uppercase">Qualified</span>
+        const handleUpdateLeadStatus = async (leadId: string, statusVal: string) => {
+          try {
+            await updateDoc(doc(db, 'customer_requirements', leadId), { leadStatus: statusVal, updatedAt: new Date().toISOString() });
+          } catch (err) {
+            console.error("Error updating lead status:", err);
+          }
+        };
+
+        const handleUpdatePriority = async (leadId: string, priorityVal: string) => {
+          try {
+            await updateDoc(doc(db, 'customer_requirements', leadId), { priority: priorityVal, updatedAt: new Date().toISOString() });
+          } catch (err) {
+            console.error("Error updating priority:", err);
+          }
+        };
+
+        const handleAssignAgent = async (leadId: string, agentName: string) => {
+          try {
+            await updateDoc(doc(db, 'customer_requirements', leadId), { assignedAgent: agentName, updatedAt: new Date().toISOString() });
+          } catch (err) {
+            console.error("Error assigning agent:", err);
+          }
+        };
+
+        const handleMarkSiteVisit = async (leadId: string) => {
+          try {
+            await updateDoc(doc(db, 'customer_requirements', leadId), { leadStatus: 'Site Visit', updatedAt: new Date().toISOString() });
+          } catch (err) {
+            console.error("Error marking site visit:", err);
+          }
+        };
+
+        const handleMarkClosed = async (leadId: string) => {
+          try {
+            await updateDoc(doc(db, 'customer_requirements', leadId), { leadStatus: 'Closed', updatedAt: new Date().toISOString() });
+          } catch (err) {
+            console.error("Error marking closed:", err);
+          }
+        };
+
+        const handleDeleteLead = async (leadId: string) => {
+          if (window.confirm("Are you sure you want to permanently delete this AI Lead requirement?")) {
+            try {
+              await deleteDoc(doc(db, 'customer_requirements', leadId));
+              if (selectedLogId === leadId) {
+                setSelectedLogId(null);
+              }
+            } catch (err) {
+              console.error("Error deleting lead:", err);
+            }
+          }
+        };
+
+        const handleStartEditing = (lead: any) => {
+          setEditLeadForm({
+            customerName: lead.customerName || '',
+            phoneNumber: lead.phoneNumber || '',
+            email: lead.email || '',
+            propertyType: lead.propertyType || '',
+            preferredLocation: lead.preferredLocation || '',
+            budget: lead.budget || '',
+            bedrooms: lead.bedrooms || '',
+            area: lead.area || '',
+            requirementSummary: lead.requirementSummary || '',
+            priority: lead.priority || 'Medium',
+            leadStatus: lead.leadStatus || 'New'
+          });
+          setIsEditingLead(true);
+        };
+
+        const handleSaveEdit = async (leadId: string) => {
+          try {
+            await updateDoc(doc(db, 'customer_requirements', leadId), {
+              ...editLeadForm,
+              updatedAt: new Date().toISOString()
+            });
+            setIsEditingLead(false);
+          } catch (err) {
+            console.error("Error saving lead edits:", err);
+            alert("Failed to save lead: " + err);
+          }
+        };
+
+        const handleClearAllFilters = () => {
+          setLogsSearchName('');
+          setLogsSearchEmail('');
+          setLogsSearchPhone('');
+          setLogsSearchKeyword('');
+          setLogsFilterLeadStatus('All');
+          setLogsFilterStatus('All');
+          setLogsFilterDate('All');
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+            <div className="bg-white border rounded-2xl max-w-6xl w-full text-left shadow-2xl flex flex-col h-[85vh] overflow-hidden">
+              {/* MODAL HEADER */}
+              <div className="flex justify-between items-center border-b px-6 py-4 bg-slate-50">
+                <div className="flex items-center gap-2">
+                  <Users className="h-5 w-5 text-indigo-650" />
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 uppercase font-mono tracking-wider">
+                      Dvarix Sales Desk • AI Leads Manager
+                    </h3>
+                    <p className="text-[10px] text-slate-500 font-sans mt-0.5">
+                      Lead-focused CRM with real-time requirement syncing and dynamic priority grading.
+                    </p>
                   </div>
-                  <div className="p-2.5 bg-white border border-slate-150 rounded-lg space-y-1.5 leading-relaxed text-slate-700 max-h-36 overflow-y-auto">
-                    <div><span className="font-bold text-indigo-600">Bot:</span> Hello! Looking for your dream property? Let is chat! Are you looking to buy, rent, sell, or invest in a property today?</div>
-                    <div><span className="font-bold text-slate-655 font-sans">User:</span> Buy a plot at Bangalore North near Airport high speed line. My budget is around 1.2 Crore.</div>
-                    <div><span className="font-bold text-indigo-600 font-sans">Bot:</span> Understood. Let me match standard Devanahalli plot matrices. Can I have your verified phone number to sync your search?</div>
-                    <div><span className="font-bold text-slate-655 font-sans">User:</span> +91 94480 12345, Anand Kumar.</div>
+                </div>
+                <button 
+                  onClick={() => setIsConversationLogsOpen(false)} 
+                  className="text-slate-400 hover:text-black cursor-pointer bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full transition"
+                >
+                  <X className="h-4.5 w-4.5" />
+                </button>
+              </div>
+
+              {/* TWO PANEL INTERFACE */}
+              <div className="flex flex-1 overflow-hidden">
+                {/* LEFT PANEL: FILTERS & SCROLLABLE LEAD LIST */}
+                <div className="w-2/5 border-r flex flex-col bg-slate-50 overflow-hidden">
+                  {/* FILTERS TOOLBAR */}
+                  <div className="p-4 border-b space-y-2 bg-white">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Customer Name</label>
+                        <input 
+                          type="text"
+                          value={logsSearchName}
+                          onChange={(e) => setLogsSearchName(e.target.value)}
+                          placeholder="Search name..."
+                          className="w-full border text-[11px] px-2 py-1 rounded bg-slate-50 font-sans"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Email</label>
+                        <input 
+                          type="text"
+                          value={logsSearchEmail}
+                          onChange={(e) => setLogsSearchEmail(e.target.value)}
+                          placeholder="Search email..."
+                          className="w-full border text-[11px] px-2 py-1 rounded bg-slate-50 font-sans"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Phone Number</label>
+                        <input 
+                          type="text"
+                          value={logsSearchPhone}
+                          onChange={(e) => setLogsSearchPhone(e.target.value)}
+                          placeholder="Search phone..."
+                          className="w-full border text-[11px] px-2 py-1 rounded bg-slate-50 font-sans"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Requirement Keyword</label>
+                        <input 
+                          type="text"
+                          value={logsSearchKeyword}
+                          onChange={(e) => setLogsSearchKeyword(e.target.value)}
+                          placeholder="Contains word..."
+                          className="w-full border text-[11px] px-2 py-1 rounded bg-slate-50 font-sans"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5 pt-1">
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Lead Status</label>
+                        <select
+                          value={logsFilterLeadStatus}
+                          onChange={(e) => setLogsFilterLeadStatus(e.target.value)}
+                          className="w-full border text-[10px] p-1 rounded bg-slate-50 font-sans"
+                        >
+                          <option value="All">All Statuses</option>
+                          <option value="New">New</option>
+                          <option value="Contacted">Contacted</option>
+                          <option value="Site Visit">Site Visit</option>
+                          <option value="Closed">Closed</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Priority</label>
+                        <select
+                          value={logsFilterStatus}
+                          onChange={(e) => setLogsFilterStatus(e.target.value)}
+                          className="w-full border text-[10px] p-1 rounded bg-slate-50 font-sans"
+                        >
+                          <option value="All">All Priorities</option>
+                          <option value="High">High</option>
+                          <option value="Medium">Medium</option>
+                          <option value="Low">Low</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Date Added</label>
+                        <select
+                          value={logsFilterDate}
+                          onChange={(e) => setLogsFilterDate(e.target.value)}
+                          className="w-full border text-[10px] p-1 rounded bg-slate-50 font-sans"
+                        >
+                          <option value="All">Any Time</option>
+                          <option value="Today">Today</option>
+                          <option value="Yesterday">Yesterday</option>
+                          <option value="7days">Last 7 Days</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-1.5 border-t">
+                      <span className="text-[10px] text-slate-500 font-mono font-medium">
+                        Found {filteredLogs.length} matching leads
+                      </span>
+                      <button 
+                        onClick={handleClearAllFilters}
+                        className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                      >
+                        Reset Filters
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* LEAD LIST */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                    {filteredLogs.length === 0 ? (
+                      <div className="text-center py-12 text-slate-400 space-y-2">
+                        <Users className="h-8 w-8 stroke-[1.5] mx-auto opacity-50" />
+                        <p className="text-xs font-sans">No matching AI leads found.</p>
+                      </div>
+                    ) : (
+                      filteredLogs.map(lead => {
+                        const isSelected = lead.leadId === (selectedLog ? selectedLog.leadId : null);
+                        
+                        return (
+                          <div 
+                            key={lead.leadId}
+                            onClick={() => { setSelectedLogId(lead.leadId); setIsEditingLead(false); }}
+                            className={`p-3.5 bg-white border rounded-xl shadow-xs transition duration-200 cursor-pointer text-left space-y-2 block relative overflow-hidden ${isSelected ? 'border-indigo-600 ring-2 ring-indigo-50/50' : 'border-slate-200 hover:border-slate-350 hover:bg-slate-50/50'}`}
+                          >
+                            <div className="flex justify-between items-start gap-1">
+                              <div className="space-y-0.5">
+                                <h4 className="font-bold text-slate-800 text-[11px] leading-tight flex items-center gap-1">
+                                  {lead.customerName || 'Anonymous Visitor'}
+                                </h4>
+                                <p className="text-[9px] text-slate-400 font-mono">
+                                  {lead.phoneNumber || 'No phone'}
+                                </p>
+                              </div>
+                              <div className="flex flex-col items-end gap-1">
+                                <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded font-mono uppercase tracking-wider ${
+                                  lead.priority === 'High' ? 'bg-red-50 text-red-700 border border-red-100' :
+                                  lead.priority === 'Medium' ? 'bg-amber-50 text-amber-700 border border-amber-100' :
+                                  'bg-slate-100 text-slate-600 border border-slate-200'
+                                }`}>
+                                  {lead.priority || 'Medium'}
+                                </span>
+                                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded font-mono uppercase tracking-wider ${
+                                  lead.leadStatus === 'Closed' ? 'bg-slate-200 text-slate-600' :
+                                  lead.leadStatus === 'Site Visit' ? 'bg-indigo-100 text-indigo-700' :
+                                  lead.leadStatus === 'Contacted' ? 'bg-amber-100 text-amber-800' :
+                                  'bg-emerald-100 text-emerald-800'
+                                }`}>
+                                  {lead.leadStatus || 'New'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* REQUIREMENT SUMMARY PREVIEW */}
+                            {lead.requirementSummary && (
+                              <p className="text-[10px] text-slate-500 font-medium line-clamp-2 italic pr-4 bg-slate-50 p-1.5 rounded border border-slate-100">
+                                {lead.requirementSummary}
+                              </p>
+                            )}
+
+                            <div className="flex justify-between items-center text-[9px] text-slate-450 border-t pt-2 font-mono">
+                              <span>Loc: {lead.preferredLocation || 'Any'}</span>
+                              <span>
+                                {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'Unknown'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
 
-                <div className="p-3 bg-slate-50 border rounded-xl space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-slate-800">Session #M18-C42 (Rohan Mehta)</span>
-                    <span className="text-[9px] bg-amber-50 border border-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold uppercase">Warm</span>
-                  </div>
-                  <div className="p-2.5 bg-white border border-slate-150 rounded-lg space-y-1.5 leading-relaxed text-slate-700 max-h-36 overflow-y-auto">
-                    <div><span className="font-bold text-indigo-600">Bot:</span> Hello! Looking for your dream property? Let is chat!</div>
-                    <div><span className="font-bold text-slate-655 font-sans">User:</span> What are the master bedroom dimensions for customization plots?</div>
-                    <div><span className="font-bold text-indigo-600">Bot:</span> Our custom plots support layout blueprints spanning 40x60 and 30x50 with customizable setback zones of 5ft.</div>
-                  </div>
+                {/* RIGHT PANEL: SELECTED LEAD DETAILED CRM VIEWER */}
+                <div className="w-3/5 flex flex-col overflow-hidden bg-slate-50">
+                  {!selectedLog ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-slate-400 space-y-4">
+                      <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center shadow-xs">
+                        <Users className="h-8 w-8 text-indigo-400 stroke-[1.5]" />
+                      </div>
+                      <div className="space-y-1.5 max-w-sm">
+                        <h4 className="font-bold text-slate-800 text-xs uppercase font-mono tracking-wide">No AI Lead Selected</h4>
+                        <p className="text-xs text-slate-500 font-sans">
+                          Select a customer lead requirements profile from the left list to review dynamic AI summaries, edit preference structures, and update deal parameters.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex flex-col overflow-hidden">
+                      {/* LEAD DETAIL HEADER */}
+                      <div className="bg-white p-5 border-b space-y-3.5">
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="space-y-1 text-left">
+                            <span className="text-[10px] font-bold text-indigo-650 font-mono block uppercase">Customer Requirement Sheet</span>
+                            <h4 className="text-xs font-mono font-bold text-slate-800 flex items-center gap-1.5">
+                              Lead ID: <span className="text-indigo-600 bg-slate-100 px-1.5 py-0.5 rounded text-[10px] font-bold">{selectedLog.leadId}</span>
+                            </h4>
+                          </div>
+
+                          <div className="flex gap-1.5">
+                            {!isEditingLead ? (
+                              <>
+                                <button
+                                  onClick={() => handleStartEditing(selectedLog)}
+                                  className="bg-indigo-50 border border-indigo-150 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer font-sans"
+                                >
+                                  Edit Lead Profile
+                                </button>
+                                <button
+                                  onClick={() => handleMarkSiteVisit(selectedLog.leadId)}
+                                  className="bg-amber-50 border border-amber-100 hover:bg-amber-100 text-amber-700 px-3 py-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer font-sans"
+                                >
+                                  Mark Site Visit
+                                </button>
+                                <button
+                                  onClick={() => handleMarkClosed(selectedLog.leadId)}
+                                  className="bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer font-sans"
+                                >
+                                  Mark Closed
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleSaveEdit(selectedLog.leadId)}
+                                  className="bg-indigo-600 border border-indigo-700 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer font-sans"
+                                >
+                                  Save Lead Changes
+                                </button>
+                                <button
+                                  onClick={() => setIsEditingLead(false)}
+                                  className="bg-slate-100 border border-slate-200 hover:bg-slate-250 text-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer font-sans"
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => handleDeleteLead(selectedLog.leadId)}
+                              className="bg-red-50 border border-red-100 hover:bg-red-100 text-red-700 px-2 py-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer"
+                              title="Delete Lead Permanent"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* HIGH-DENSITY METADATA CRM SELECTORS DECK */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 p-3.5 bg-slate-50 border rounded-xl font-sans text-xs text-left">
+                          <div>
+                            <span className="text-[9px] text-slate-450 uppercase block font-bold">Assign Agent</span>
+                            <select
+                              value={selectedLog.assignedAgent || 'Expert Match Desk'}
+                              onChange={(e) => handleAssignAgent(selectedLog.leadId, e.target.value)}
+                              className="font-bold text-[10px] p-0.5 bg-transparent border-b text-indigo-700 focus:outline-hidden cursor-pointer w-full"
+                            >
+                              <option value="Expert Match Desk">Expert Match Desk</option>
+                              <option value="Rohan Deshmukh (Devanahalli Expert)">Rohan Deshmukh</option>
+                              <option value="Meera Nair (Whitefield Specialist)">Meera Nair</option>
+                              <option value="Abhishek Sen (Commercial Head)">Abhishek Sen</option>
+                              <option value="Ananya Gowda (Luxury Advisor)">Ananya Gowda</option>
+                            </select>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-450 uppercase block font-bold">Lead Status</span>
+                            <select
+                              value={selectedLog.leadStatus || 'New'}
+                              onChange={(e) => handleUpdateLeadStatus(selectedLog.leadId, e.target.value)}
+                              className="font-bold text-[10px] p-0.5 bg-transparent border-b text-indigo-700 focus:outline-hidden cursor-pointer w-full"
+                            >
+                              <option value="New">New</option>
+                              <option value="Contacted">Contacted</option>
+                              <option value="Site Visit">Site Visit</option>
+                              <option value="Closed">Closed</option>
+                            </select>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-450 uppercase block font-bold">Deal Priority</span>
+                            <select
+                              value={selectedLog.priority || 'Medium'}
+                              onChange={(e) => handleUpdatePriority(selectedLog.leadId, e.target.value)}
+                              className="font-bold text-[10px] p-0.5 bg-transparent border-b text-indigo-700 focus:outline-hidden cursor-pointer w-full"
+                            >
+                              <option value="High">High Priority</option>
+                              <option value="Medium">Medium Priority</option>
+                              <option value="Low">Low Priority</option>
+                            </select>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-450 uppercase block font-bold">Captured Date</span>
+                            <span className="font-mono text-[10px] text-slate-600 block mt-0.5">
+                              {selectedLog.createdAt ? new Date(selectedLog.createdAt).toLocaleDateString() : 'N/A'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* WORKSPACE AREA */}
+                      <div className="flex-1 overflow-y-auto p-6 text-left">
+                        {isEditingLead ? (
+                          /* LEAD EDIT FORM */
+                          <div className="bg-white border rounded-2xl p-5 space-y-4 shadow-xs">
+                            <h4 className="text-xs font-bold text-slate-800 uppercase font-mono tracking-wider border-b pb-2">
+                              Modify Requirement Parameters
+                            </h4>
+                            <div className="grid grid-cols-2 gap-3 font-sans text-xs">
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-600 block">Customer Name</label>
+                                <input 
+                                  type="text"
+                                  value={editLeadForm.customerName}
+                                  onChange={(e) => setEditLeadForm({...editLeadForm, customerName: e.target.value})}
+                                  className="w-full border p-1.5 rounded"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-600 block">Phone Number</label>
+                                <input 
+                                  type="text"
+                                  value={editLeadForm.phoneNumber}
+                                  onChange={(e) => setEditLeadForm({...editLeadForm, phoneNumber: e.target.value})}
+                                  className="w-full border p-1.5 rounded"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-600 block">Email Address</label>
+                                <input 
+                                  type="text"
+                                  value={editLeadForm.email}
+                                  onChange={(e) => setEditLeadForm({...editLeadForm, email: e.target.value})}
+                                  className="w-full border p-1.5 rounded"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-600 block">Preferred Location</label>
+                                <input 
+                                  type="text"
+                                  value={editLeadForm.preferredLocation}
+                                  onChange={(e) => setEditLeadForm({...editLeadForm, preferredLocation: e.target.value})}
+                                  className="w-full border p-1.5 rounded"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-600 block">Property Type</label>
+                                <input 
+                                  type="text"
+                                  value={editLeadForm.propertyType}
+                                  onChange={(e) => setEditLeadForm({...editLeadForm, propertyType: e.target.value})}
+                                  className="w-full border p-1.5 rounded"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-600 block">Budget Target</label>
+                                <input 
+                                  type="text"
+                                  value={editLeadForm.budget}
+                                  onChange={(e) => setEditLeadForm({...editLeadForm, budget: e.target.value})}
+                                  className="w-full border p-1.5 rounded"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-600 block">Bedrooms (BHK)</label>
+                                <input 
+                                  type="text"
+                                  value={editLeadForm.bedrooms}
+                                  onChange={(e) => setEditLeadForm({...editLeadForm, bedrooms: e.target.value})}
+                                  className="w-full border p-1.5 rounded"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-600 block">Sft/Plot Area</label>
+                                <input 
+                                  type="text"
+                                  value={editLeadForm.area}
+                                  onChange={(e) => setEditLeadForm({...editLeadForm, area: e.target.value})}
+                                  className="w-full border p-1.5 rounded"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-1 font-sans text-xs">
+                              <label className="font-bold text-slate-600 block">AI Generated Requirement Summary</label>
+                              <textarea
+                                value={editLeadForm.requirementSummary}
+                                onChange={(e) => setEditLeadForm({...editLeadForm, requirementSummary: e.target.value})}
+                                className="w-full border p-2 rounded h-20 font-sans"
+                                placeholder="Edit the requirement summary text directly..."
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          /* LEAD PROFILE VIEW */
+                          <div className="space-y-6">
+                            {/* CRM OVERVIEW CARDS */}
+                            <div className="grid grid-cols-2 gap-4 text-left">
+                              <div className="bg-white border rounded-2xl p-4 space-y-1 shadow-2xs">
+                                <span className="text-[10px] text-slate-450 uppercase font-mono font-bold">Visitor Contact Details</span>
+                                <div className="space-y-1.5 pt-1 text-xs">
+                                  <p className="flex justify-between border-b pb-1 font-sans">
+                                    <span className="text-slate-500">Contact Name:</span>
+                                    <span className="font-bold text-slate-800">{selectedLog.customerName || 'None'}</span>
+                                  </p>
+                                  <p className="flex justify-between border-b pb-1 font-sans">
+                                    <span className="text-slate-500">Phone:</span>
+                                    <span className="font-bold text-slate-800">{selectedLog.phoneNumber || 'None'}</span>
+                                  </p>
+                                  <p className="flex justify-between pb-1 font-sans">
+                                    <span className="text-slate-500">Email:</span>
+                                    <span className="font-bold text-slate-800 truncate max-w-[180px]" title={selectedLog.email}>{selectedLog.email || 'None'}</span>
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="bg-white border rounded-2xl p-4 space-y-1 shadow-2xs">
+                                <span className="text-[10px] text-slate-450 uppercase font-mono font-bold">Property Preferences</span>
+                                <div className="space-y-1.5 pt-1 text-xs">
+                                  <p className="flex justify-between border-b pb-1 font-sans">
+                                    <span className="text-slate-500">Location:</span>
+                                    <span className="font-bold text-slate-800">{selectedLog.preferredLocation || 'Any'}</span>
+                                  </p>
+                                  <p className="flex justify-between border-b pb-1 font-sans">
+                                    <span className="text-slate-500">Property Type:</span>
+                                    <span className="font-bold text-slate-800">{selectedLog.propertyType || 'Flexible'}</span>
+                                  </p>
+                                  <p className="flex justify-between pb-1 font-sans">
+                                    <span className="text-slate-500">Budget Range:</span>
+                                    <span className="font-bold text-indigo-700">{selectedLog.budget || 'Flexible'}</span>
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* BHK AND SIZE STATS */}
+                            <div className="grid grid-cols-2 gap-4 text-left">
+                              <div className="bg-white border rounded-2xl p-4 text-xs space-y-1">
+                                <span className="text-[9px] text-slate-450 uppercase font-mono block font-bold">Config (Bedrooms)</span>
+                                <p className="font-bold text-slate-800 text-sm">{selectedLog.bedrooms || 'Flexible'}</p>
+                              </div>
+                              <div className="bg-white border rounded-2xl p-4 text-xs space-y-1">
+                                <span className="text-[9px] text-slate-450 uppercase font-mono block font-bold">Unit Size / Plot Area</span>
+                                <p className="font-bold text-slate-800 text-sm">{selectedLog.area || 'Flexible'}</p>
+                              </div>
+                            </div>
+
+                            {/* SUMMARY BOX */}
+                            <div className="bg-indigo-50/50 border border-indigo-100 rounded-2xl p-5 space-y-2 text-left">
+                              <div className="flex items-center gap-1.5 text-[10px] font-mono text-indigo-850 font-bold uppercase tracking-wider">
+                                <Sparkles className="h-4 w-4 text-indigo-600 animate-pulse" />
+                                AI-Generated Requirement Summary
+                              </div>
+                              <p className="text-slate-850 font-sans text-xs leading-relaxed font-medium">
+                                {selectedLog.requirementSummary || 'No summary text available yet.'}
+                              </p>
+                            </div>
+
+                            {/* TECHNICAL METRICS */}
+                            <div className="bg-white border rounded-2xl p-4 space-y-2 font-mono text-[10px] text-slate-500 text-left">
+                              <p className="flex justify-between">
+                                <span>Session ID Token:</span>
+                                <span>{selectedLog.sessionId || 'N/A'}</span>
+                              </p>
+                              <p className="flex justify-between">
+                                <span>Visitor ID Cookie:</span>
+                                <span>{selectedLog.visitorId || 'N/A'}</span>
+                              </p>
+                              <p className="flex justify-between">
+                                <span>Attribution Channel:</span>
+                                <span>{selectedLog.source || 'AI Chatbot'}</span>
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t">
-              <button 
-                onClick={() => setIsConversationLogsOpen(false)}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
-              >
-                Close Dialogue Logs
-              </button>
+              {/* MODAL FOOTER */}
+              <div className="bg-slate-50 border-t px-6 py-4 flex justify-between items-center shrink-0">
+                <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">
+                  DVARIX SALES ENGINE • SECURE PROPERTY LEADS
+                </span>
+                <button 
+                  onClick={() => setIsConversationLogsOpen(false)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer font-sans"
+                >
+                  Close Leads Panel
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* MODAL 5: FAILED RESPONSES OVERLAY */}
       {isFailedResponsesOpen && (

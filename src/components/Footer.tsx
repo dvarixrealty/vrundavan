@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import Logo from './Logo';
 import { SiteCMSConfig, ActiveTab } from '../types';
+import Link from './Link';
 
 interface FooterProps {
   activeTab: ActiveTab;
@@ -176,31 +177,70 @@ export default function Footer({
   const phoneText = footerData?.phone || "+91 63009 84846";
   const emailText = footerData?.email || "dvarixrealty@gmail.com";
 
+  const companyLinks = footerData?.companyLinks && footerData.companyLinks.length > 0
+    ? footerData.companyLinks
+    : [
+        { label: 'Home', url: '/' },
+        { label: 'Properties', url: '/properties' },
+        { label: 'About Us', url: '/about' },
+        { label: 'Contact Us', url: '/contact' },
+        { label: 'Custom Request', url: '/custom-request' }
+      ];
+
+  const servicesLinks = footerData?.servicesLinks && footerData.servicesLinks.length > 0
+    ? footerData.servicesLinks
+    : [
+        { label: 'Residential Properties', url: '/properties', filter: 'Residential' },
+        { label: 'Commercial Properties', url: '/properties', filter: 'Commercial' },
+        { label: 'Plots & Land', url: '/properties', filter: 'Plots' },
+        { label: 'Luxury Villas', url: '/properties', filter: 'Villas' },
+        { label: 'Investment Advisory', url: '/custom-request' }
+      ];
+
+  const quickLinks = footerData?.quickLinks && footerData.quickLinks.length > 0
+    ? footerData.quickLinks
+    : [
+        { label: 'Privacy Policy', url: '/privacy-policy' },
+        { label: 'Terms & Conditions', url: '/terms-conditions' },
+        { label: 'RERA Compliance', url: '/rera-compliance' },
+        { label: 'FAQs', url: '/faqs' },
+        { label: 'Sitemap', url: '/sitemap' }
+      ];
+
   // Dynamic link routing handlers with advanced filter capabilities
   const handleLinkClick = (url: string, categoryFilter?: string) => {
     if (!url) return;
 
-    if (url === 'Home') {
+    if (url === 'Home' || url === '/' || url === '#') {
       setActiveTab('Home');
+      window.history.pushState(null, '', '/');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else if (url === 'Properties') {
-      if (setSearchFilter && categoryFilter) {
-        setSearchFilter({ keyword: '', type: categoryFilter, location: 'All' });
+    } else if (url === 'Properties' || url === '/properties' || url.startsWith('/properties')) {
+      let typeFilter = categoryFilter;
+      if (!typeFilter && url.includes('?type=')) {
+        typeFilter = url.split('?type=')[1];
+      }
+      if (setSearchFilter && typeFilter) {
+        setSearchFilter({ keyword: '', type: typeFilter, location: 'All' });
       }
       setActiveTab('Properties');
+      window.history.pushState(null, '', '/properties');
       setTimeout(() => {
         scrollToListings();
       }, 120);
-    } else if (url === 'About') {
+    } else if (url === 'About' || url === '/about') {
       setActiveTab('About');
+      window.history.pushState(null, '', '/about');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else if (url === 'Contact' || url === 'Contact Us') {
+    } else if (url === 'Contact' || url === 'Contact Us' || url === '/contact') {
       setActiveTab('Contact');
+      window.history.pushState(null, '', '/contact');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else if (url === 'CustomRequest' || url === 'Custom Request') {
+    } else if (url === 'CustomRequest' || url === 'Custom Request' || url === '/custom-request') {
       onOpenCustomRequest();
-    } else if (url === 'FAQs') {
+    } else if (url === 'FAQs' || url === '/faqs') {
       setActiveTab('Home');
+      window.history.pushState(null, '', '/');
       setTimeout(() => {
         const faqSec = document.getElementById('website-faq-portal-section') || document.getElementById('faq-section');
         if (faqSec) {
@@ -213,20 +253,26 @@ export default function Footer({
           window.scrollTo({ top: document.body.scrollHeight * 0.7, behavior: 'smooth' });
         }
       }, 150);
-    } else if (url === 'Privacy' || url === 'Privacy Policy') {
+    } else if (url === 'Privacy' || url === 'Privacy Policy' || url === '/privacy-policy') {
       setActiveTab('PrivacyPolicy');
+      window.history.pushState(null, '', '/privacy-policy');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else if (url === 'Terms' || url === 'Terms & Conditions') {
+    } else if (url === 'Terms' || url === 'Terms & Conditions' || url === '/terms-conditions') {
       setActiveTab('Terms');
+      window.history.pushState(null, '', '/terms-conditions');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else if (url === 'RERA' || url === 'Sitemap' || url === 'RERA Compliance') {
+    } else if (url === 'RERA' || url === 'Sitemap' || url === 'RERA Compliance' || url === '/rera-compliance' || url === '/sitemap') {
+      window.history.pushState(null, '', url);
       window.dispatchEvent(new CustomEvent('cms-alert-notification', {
         detail: {
-          title: `${url} Policy`,
+          title: `${url.replace('/', '').toUpperCase()} Policy`,
           message: `Official compliance framework is successfully configured under registered legal advice.`,
           category: "Compliance"
         }
       }));
+    } else {
+      window.history.pushState(null, '', url);
+      window.dispatchEvent(new PopStateEvent('popstate'));
     }
   };
 
@@ -248,12 +294,13 @@ export default function Footer({
           
           {/* COLUMN 1: Brand & Two Action Buttons (Col span 4) */}
           <div className="col-span-12 md:col-span-12 lg:col-span-4 space-y-6">
-            <div 
+            <Link 
+              to="/"
               className="inline-block cursor-pointer group transition-transform duration-300 hover:scale-[1.01]" 
-              onClick={() => handleLinkClick('Home')}
+              onClick={() => handleLinkClick('/')}
             >
               <Logo size="md" />
-            </div>
+            </Link>
             
             <p className="text-slate-300 font-light text-[13px] leading-relaxed tracking-wide max-w-sm">
               {brandDescription}
@@ -263,32 +310,34 @@ export default function Footer({
             <div className="flex flex-col sm:flex-row lg:flex-col gap-3.5 pt-2 max-w-sm sm:max-w-none lg:max-w-xs">
               
               {/* Primary Button */}
-              <motion.button
-                whileHover={{ y: -2, scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                onClick={() => handleLinkClick('Properties')}
-                className="flex items-center justify-between px-5 py-3.5 bg-gradient-to-r from-[#FF8C00] to-[#FF5A3C] hover:from-[#ff961f] hover:to-[#ff6d51] text-white text-[11.5px] font-bold uppercase tracking-wider rounded-xl transition-all duration-300 shadow-md hover:shadow-[#FF8C00]/20 cursor-pointer w-full group"
-              >
-                <span className="flex items-center gap-2.5">
-                  <Home className="w-4 h-4 shrink-0" />
-                  Explore Properties
-                </span>
-                <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1.5" />
-              </motion.button>
+              <Link to="/properties" onClick={() => handleLinkClick('/properties')} className="block w-full">
+                <motion.button
+                  whileHover={{ y: -2, scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  className="flex items-center justify-between px-5 py-3.5 bg-gradient-to-r from-[#FF8C00] to-[#FF5A3C] hover:from-[#ff961f] hover:to-[#ff6d51] text-white text-[11.5px] font-bold uppercase tracking-wider rounded-xl transition-all duration-300 shadow-md hover:shadow-[#FF8C00]/20 cursor-pointer w-full group"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Home className="w-4 h-4 shrink-0" />
+                    Explore Properties
+                  </span>
+                  <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1.5" />
+                </motion.button>
+              </Link>
 
               {/* Secondary Button */}
-              <motion.button
-                whileHover={{ y: -2, scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                onClick={() => handleLinkClick('Contact')}
-                className="flex items-center justify-between px-5 py-3.5 bg-transparent border border-[#FF6B3D] hover:bg-[#FF6B3D]/10 hover:border-[#FF8C00] text-white text-[11.5px] font-bold uppercase tracking-wider rounded-xl transition-all duration-300 cursor-pointer w-full group"
-              >
-                <span className="flex items-center gap-2.5">
-                  <UserCheck className="w-4 h-4 text-[#FF6B3D] shrink-0" />
-                  Contact Advisor
-                </span>
-                <ArrowRight className="w-4 h-4 text-slate-400 transition-transform duration-300 group-hover:translate-x-1.5" />
-              </motion.button>
+              <Link to="/contact" onClick={() => handleLinkClick('/contact')} className="block w-full">
+                <motion.button
+                  whileHover={{ y: -2, scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  className="flex items-center justify-between px-5 py-3.5 bg-transparent border border-[#FF6B3D] hover:bg-[#FF6B3D]/10 hover:border-[#FF8C00] text-white text-[11.5px] font-bold uppercase tracking-wider rounded-xl transition-all duration-300 cursor-pointer w-full group"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <UserCheck className="w-4 h-4 text-[#FF6B3D] shrink-0" />
+                    Contact Advisor
+                  </span>
+                  <ArrowRight className="w-4 h-4 text-slate-400 transition-transform duration-300 group-hover:translate-x-1.5" />
+                </motion.button>
+              </Link>
               
             </div>
           </div>
@@ -300,21 +349,16 @@ export default function Footer({
               <span className="absolute bottom-0 left-0 w-8 h-[2px] bg-[#FF6B3D]" />
             </h4>
             <ul className="space-y-3.5">
-              {[
-                { label: 'Home', url: 'Home' },
-                { label: 'Properties', url: 'Properties' },
-                { label: 'About Us', url: 'About' },
-                { label: 'Contact Us', url: 'Contact' },
-                { label: 'Custom Request', url: 'CustomRequest' }
-              ].map((link, idx) => (
+              {companyLinks.map((link, idx) => (
                 <li key={idx}>
-                  <button
+                  <Link
+                    to={link.url}
                     onClick={() => handleLinkClick(link.url)}
                     className="flex items-center text-[13px] text-slate-300 hover:text-[#FF6B3D] font-light transition-all duration-200 cursor-pointer group text-left"
                   >
                     <ChevronRight className="w-3.5 h-3.5 text-[#FF6B3D]/80 mr-1.5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
                     {link.label}
-                  </button>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -327,21 +371,16 @@ export default function Footer({
               <span className="absolute bottom-0 left-0 w-8 h-[2px] bg-[#FF6B3D]" />
             </h4>
             <ul className="space-y-3.5">
-              {[
-                { label: 'Residential Properties', url: 'Properties', filter: 'Residential' },
-                { label: 'Commercial Properties', url: 'Properties', filter: 'Commercial' },
-                { label: 'Plots & Land', url: 'Properties', filter: 'Plots' },
-                { label: 'Luxury Villas', url: 'Properties', filter: 'Villas' },
-                { label: 'Investment Advisory', url: 'CustomRequest' }
-              ].map((link, idx) => (
+              {servicesLinks.map((link, idx) => (
                 <li key={idx}>
-                  <button
+                  <Link
+                    to={link.url}
                     onClick={() => handleLinkClick(link.url, link.filter)}
                     className="flex items-center text-[13px] text-slate-300 hover:text-[#FF6B3D] font-light transition-all duration-200 cursor-pointer group text-left"
                   >
                     <ChevronRight className="w-3.5 h-3.5 text-[#FF6B3D]/80 mr-1.5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
                     {link.label}
-                  </button>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -354,19 +393,14 @@ export default function Footer({
               <span className="absolute bottom-0 left-0 w-8 h-[2px] bg-[#FF6B3D]" />
             </h4>
             <ul className="space-y-3.5">
-              {[
-                { label: 'Privacy Policy', url: 'Privacy Policy' },
-                { label: 'Terms & Conditions', url: 'Terms & Conditions' },
-                { label: 'RERA Compliance', url: 'RERA Compliance' },
-                { label: 'FAQs', url: 'FAQs' },
-                { label: 'Sitemap', url: 'Sitemap' }
-              ].map((link, idx) => {
+              {quickLinks.map((link, idx) => {
                 const isActive = 
-                  (activeTab === 'PrivacyPolicy' && link.url === 'Privacy Policy') ||
-                  (activeTab === 'Terms' && link.url === 'Terms & Conditions');
+                  (activeTab === 'PrivacyPolicy' && (link.url === 'Privacy Policy' || link.url === '/privacy-policy')) ||
+                  (activeTab === 'Terms' && (link.url === 'Terms & Conditions' || link.url === '/terms-conditions'));
                 return (
                   <li key={idx}>
-                    <button
+                    <Link
+                      to={link.url}
                       onClick={() => handleLinkClick(link.url)}
                       className={`flex items-center text-[13px] font-light transition-all duration-200 cursor-pointer group text-left ${
                         isActive ? 'text-[#FF6B3D] font-medium' : 'text-slate-300 hover:text-[#FF6B3D]'
@@ -376,7 +410,7 @@ export default function Footer({
                         isActive ? 'text-[#FF6B3D]' : 'text-[#FF6B3D]/80'
                       }`} />
                       {link.label}
-                    </button>
+                    </Link>
                   </li>
                 );
               })}

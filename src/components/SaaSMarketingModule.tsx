@@ -419,8 +419,8 @@ export default function SaaSMarketingModule({
       objectives: formObjectives || 'Raise residential acquisition registers.',
       targetAudience: formTargetAudience || 'Standard residential buyers and investors.',
       dailySpendLimits: Number(formDailySpend),
-      utmSource: formUtmSource || formPlatform.toLowerCase().replace(/\s+/g, '_'),
-      utmCampaign: formUtmCampaign || formName.toLowerCase().replace(/\s+/g, '_'),
+      utmSource: formUtmSource || (formPlatform || '').toLowerCase().replace(/\s+/g, '_'),
+      utmCampaign: formUtmCampaign || (formName || '').toLowerCase().replace(/\s+/g, '_'),
       utmMedium: formUtmMedium || 'cpc',
       creativeAssets: historicalAssets,
       activityLogs: newLogs
@@ -628,7 +628,7 @@ export default function SaaSMarketingModule({
       id: customLeadId,
       name: incomingLeadName,
       mobile: incomingLeadPhone || '+91 98888 77777',
-      email: incomingLeadEmail || `${incomingLeadName.toLowerCase().replace(/\s+/g, '')}@testmarketing.com`,
+      email: incomingLeadEmail || `${(incomingLeadName || '').toLowerCase().replace(/\s+/g, '')}@testmarketing.com`,
       propertyRequirement: 'Luxury 3BHK Apartment Suite',
       budget: '₹2.5 Cr - ₹4 Cr',
       preferredLocation: 'Sector 63 Layouts',
@@ -717,9 +717,9 @@ export default function SaaSMarketingModule({
       // 4. Search search strings
       if (searchQuery) {
         const queryLower = searchQuery.toLowerCase();
-        const matchesName = c.name.toLowerCase().includes(queryLower);
-        const matchesId = c.id.toLowerCase().includes(queryLower);
-        const matchesManager = c.assignedManager.toLowerCase().includes(queryLower);
+        const matchesName = (c.name || '').toLowerCase().includes(queryLower);
+        const matchesId = (c.id || '').toLowerCase().includes(queryLower);
+        const matchesManager = (c.assignedManager || '').toLowerCase().includes(queryLower);
         return matchesName || matchesId || matchesManager;
       }
 

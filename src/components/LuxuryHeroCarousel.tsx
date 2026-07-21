@@ -295,6 +295,7 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
   const [formPhone, setFormPhone] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formSuccess, setFormSuccess] = useState(false);
+  const [hoveredBtnId, setHoveredBtnId] = useState<string | null>(null);
 
   // Parse Banner display mode (Mode 1: Exact, Mode 2: Dynamic, Mode 3: Video, Mode 4: Custom Builder)
   const displayMode = banner.displayMode || 'Mode2'; // default to Dynamic Hero Banner
@@ -360,11 +361,13 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
   const bgSettings = (banner.backgroundSettings || {}) as any;
   const floatingCardSettings = (banner.floatingCardSettings || {}) as any;
   const animationSettings = (banner.animationSettings || {}) as any;
+  const layoutSettings = banner.visualLayoutSettings;
 
   // Height configurations
-  const desktopHeight = canvasSettings.desktopHeight || '600px';
-  const tabletHeight = canvasSettings.tabletHeight || '500px';
-  const mobileHeight = canvasSettings.mobileHeight || '400px';
+  const desktopHeight = layoutSettings?.desktopHeight || layoutSettings?.bannerHeight || canvasSettings.desktopHeight || '650px';
+  const laptopHeight = layoutSettings?.laptopHeight || layoutSettings?.bannerHeight || '550px';
+  const tabletHeight = layoutSettings?.tabletHeight || canvasSettings.tabletHeight || '450px';
+  const mobileHeight = layoutSettings?.mobileHeight || canvasSettings.mobileHeight || '380px';
   
   const heightStyle = {
     '--desktop-h': desktopHeight,
@@ -399,6 +402,14 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
   bgStyle.backgroundPosition = bgSettings.backgroundPosition || 'center';
   bgStyle.backgroundSize = bgSettings.backgroundSize || 'cover';
   bgStyle.backgroundRepeat = 'no-repeat';
+
+  if (layoutSettings) {
+    if (layoutSettings.backgroundPosition) bgStyle.backgroundPosition = layoutSettings.backgroundPosition;
+    if (layoutSettings.backgroundSize) bgStyle.backgroundSize = layoutSettings.backgroundSize;
+    if (layoutSettings.backgroundRepeat) bgStyle.backgroundRepeat = layoutSettings.backgroundRepeat;
+    if (layoutSettings.backgroundAttachment) bgStyle.backgroundAttachment = layoutSettings.backgroundAttachment;
+    if (layoutSettings.enableParallax) bgStyle.backgroundAttachment = 'fixed';
+  }
 
   // Glass Effect option
   const isGlassCanvas = canvasSettings.glassEffect;
@@ -472,6 +483,14 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
     if (textSettings.fontFamily) fontStyle.fontFamily = textSettings.fontFamily;
     if (textSettings.letterSpacing) fontStyle.letterSpacing = `${textSettings.letterSpacing}px`;
     if (textSettings.lineHeight) fontStyle.lineHeight = textSettings.lineHeight;
+
+    if (layoutSettings) {
+      if (layoutSettings.titleFontSize) fontStyle.fontSize = layoutSettings.titleFontSize;
+      if (layoutSettings.textColor) fontStyle.color = layoutSettings.textColor;
+      if (layoutSettings.fontWeight) fontStyle.fontWeight = layoutSettings.fontWeight;
+      if (layoutSettings.lineHeight) fontStyle.lineHeight = layoutSettings.lineHeight;
+      if (layoutSettings.letterSpacing) fontStyle.letterSpacing = layoutSettings.letterSpacing;
+    }
 
     let displayElement = <span>{headlineText}</span>;
 
@@ -567,11 +586,43 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
             ? 'bg-white/80 hover:bg-white text-slate-900 border border-slate-200'
             : 'bg-[#10B981] hover:bg-[#0da471] text-white border border-[#10B981]';
 
+          const isHovered = hoveredBtnId === btn.id;
+          const isPrimary = style === 'primary' || btn.id === 'p1';
+
+          const customBtnStyle: React.CSSProperties = {};
+          if (layoutSettings) {
+            // Width & Height
+            const btnWidth = isPrimary ? layoutSettings.btnPrimaryWidth : layoutSettings.btnSecondaryWidth;
+            const btnHeight = isPrimary ? layoutSettings.btnPrimaryHeight : layoutSettings.btnSecondaryHeight;
+            if (btnWidth && btnWidth !== 'auto') customBtnStyle.width = btnWidth;
+            if (btnHeight && btnHeight !== 'auto') customBtnStyle.height = btnHeight;
+
+            // Border radius & padding
+            if (layoutSettings.btnBorderRadius) customBtnStyle.borderRadius = layoutSettings.btnBorderRadius;
+            if (layoutSettings.btnPadding) customBtnStyle.padding = layoutSettings.btnPadding;
+
+            // Colors
+            if (isPrimary) {
+              customBtnStyle.backgroundColor = isHovered && layoutSettings.btnHoverBgColor ? layoutSettings.btnHoverBgColor : (layoutSettings.btnBgColor || '#ff5a3c');
+              customBtnStyle.borderColor = isHovered && layoutSettings.btnHoverBgColor ? layoutSettings.btnHoverBgColor : (layoutSettings.btnBgColor || '#ff5a3c');
+              customBtnStyle.color = isHovered && layoutSettings.btnHoverTextColor ? layoutSettings.btnHoverTextColor : (layoutSettings.btnTextColor || '#ffffff');
+            } else {
+              // Secondary button colors
+              customBtnStyle.backgroundColor = isHovered ? '#1e293b' : 'rgba(255,255,255,0.1)';
+              customBtnStyle.borderColor = isHovered ? '#334155' : 'rgba(255,255,255,0.2)';
+              customBtnStyle.color = '#ffffff';
+              customBtnStyle.borderWidth = '1px';
+            }
+          }
+
           return (
             <button
               key={btn.id}
               onClick={() => handleActionClick(btn.config || btn, btn.legacyUrl, onPrimaryClick)}
-              className={`px-6 py-3.5 text-xs font-bold uppercase tracking-widest rounded-xl shadow-md hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 ${btnClasses}`}
+              onMouseEnter={() => setHoveredBtnId(btn.id)}
+              onMouseLeave={() => setHoveredBtnId(null)}
+              style={customBtnStyle}
+              className={`px-6 py-3.5 text-xs font-bold uppercase tracking-widest rounded-xl shadow-md hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 ${layoutSettings ? '' : btnClasses}`}
             >
               <span>{btn.text}</span>
               <ArrowRight className="w-4 h-4" />
@@ -646,11 +697,121 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
     );
   }
 
+  // Spacing, Border & Advanced Overrides
+  const containerStyle: React.CSSProperties = {
+    ...bgStyle,
+    ...heightStyle,
+    ...canvasFilterStyle,
+  };
+
+  if (layoutSettings) {
+    if (layoutSettings.bannerWidth) containerStyle.width = layoutSettings.bannerWidth;
+    if (layoutSettings.maxWidth) containerStyle.maxWidth = layoutSettings.maxWidth;
+    if (layoutSettings.minHeight) containerStyle.minHeight = layoutSettings.minHeight;
+
+    if (layoutSettings.paddingTop) containerStyle.paddingTop = layoutSettings.paddingTop;
+    if (layoutSettings.paddingBottom) containerStyle.paddingBottom = layoutSettings.paddingBottom;
+    if (layoutSettings.paddingLeft) containerStyle.paddingLeft = layoutSettings.paddingLeft;
+    if (layoutSettings.paddingRight) containerStyle.paddingRight = layoutSettings.paddingRight;
+
+    if (layoutSettings.marginTop) containerStyle.marginTop = layoutSettings.marginTop;
+    if (layoutSettings.marginBottom) containerStyle.marginBottom = layoutSettings.marginBottom;
+    if (layoutSettings.marginLeft) containerStyle.marginLeft = layoutSettings.marginLeft;
+    if (layoutSettings.marginRight) containerStyle.marginRight = layoutSettings.marginRight;
+
+    if (layoutSettings.borderRadius) containerStyle.borderRadius = layoutSettings.borderRadius;
+    if (layoutSettings.borderWidth) containerStyle.borderWidth = layoutSettings.borderWidth;
+    if (layoutSettings.borderColor) containerStyle.borderColor = layoutSettings.borderColor;
+
+    if (layoutSettings.boxShadow && layoutSettings.boxShadow !== 'none') containerStyle.boxShadow = layoutSettings.boxShadow;
+    if (layoutSettings.zIndex) containerStyle.zIndex = Number(layoutSettings.zIndex) || 10;
+    if (layoutSettings.overflowControl) containerStyle.overflow = layoutSettings.overflowControl;
+    if (layoutSettings.blurEffect && layoutSettings.blurEffect !== 'none' && layoutSettings.blurEffect !== '0px') {
+      containerStyle.backdropFilter = `blur(${layoutSettings.blurEffect})`;
+    }
+  }
+
+  // Overlay color and opacity
+  const overlayOpacity = layoutSettings && layoutSettings.overlayOpacity !== undefined
+    ? layoutSettings.overlayOpacity / 100
+    : (bgSettings.overlayOpacity ?? 40) / 100;
+
+  const overlayBgColor = layoutSettings && layoutSettings.overlayColor
+    ? layoutSettings.overlayColor
+    : '#040914';
+
+  // Content Layout Overrides
+  let finalContentAlignClass = contentAlignClass;
+  let finalVerticalAlignClass = verticalAlignClass;
+  const contentStyle: React.CSSProperties = {};
+
+  if (layoutSettings) {
+    if (layoutSettings.contentWidth) {
+      contentStyle.maxWidth = layoutSettings.contentWidth;
+    } else if (textSettings.maxContentWidth) {
+      contentStyle.maxWidth = `${textSettings.maxContentWidth}px`;
+    }
+
+    if (layoutSettings.contentPadding) {
+      contentStyle.padding = layoutSettings.contentPadding;
+    }
+    if (layoutSettings.gapBetweenElements) {
+      contentStyle.gap = layoutSettings.gapBetweenElements;
+    }
+
+    // Horizontal Alignment
+    if (layoutSettings.contentHorizontalAlign === 'center') {
+      finalContentAlignClass = 'items-center text-center mx-auto';
+    } else if (layoutSettings.contentHorizontalAlign === 'right') {
+      finalContentAlignClass = 'items-end text-right ml-auto';
+    } else if (layoutSettings.contentHorizontalAlign === 'left') {
+      finalContentAlignClass = 'items-start text-left mr-auto';
+    }
+
+    // Vertical Alignment
+    if (layoutSettings.contentVerticalAlign === 'top') {
+      finalVerticalAlignClass = 'items-start';
+    } else if (layoutSettings.contentVerticalAlign === 'bottom') {
+      finalVerticalAlignClass = 'items-end';
+    } else if (layoutSettings.contentVerticalAlign === 'center') {
+      finalVerticalAlignClass = 'items-center';
+    }
+  }
+
+  // Animation Variant Configs
+  const isAnimEnabled = layoutSettings ? layoutSettings.animationEnabled : (animationSettings.enabled !== false);
+  const animType = layoutSettings ? layoutSettings.animationType : (animationSettings.type || 'fade');
+  const animDurationStr = layoutSettings ? layoutSettings.animationDuration : `${animationSettings.duration || 0.8}s`;
+  const animDelayStr = layoutSettings ? layoutSettings.animationDelay : '0.1s';
+
+  const animDuration = parseFloat(animDurationStr) || 0.8;
+  const animDelay = parseFloat(animDelayStr) || 0.1;
+
+  const contentVariants = {
+    hidden: {
+      opacity: 0,
+      x: animType === 'slide-left' ? -50 : animType === 'slide-right' ? 50 : 0,
+      y: animType === 'zoom' || animType === 'scale' ? 0 : 20,
+      scale: animType === 'zoom' ? 0.92 : animType === 'scale' ? 0.95 : 1
+    },
+    visible: {
+      opacity: 1,
+      x: 0,
+      y: 0,
+      scale: 1,
+      transition: {
+        duration: isAnimEnabled ? animDuration : 0,
+        delay: animDelay,
+        ease: 'easeOut'
+      }
+    }
+  };
+
   return (
     <div 
-      style={{ ...bgStyle, ...heightStyle, ...canvasFilterStyle }}
-      className={`hero-builder-container w-full relative overflow-hidden transition-all duration-500 rounded-[28px] p-6 sm:p-12 md:p-16 flex ${rowLayoutClass} ${verticalAlignClass} justify-between gap-10 ${
-        isGlassCanvas ? 'backdrop-blur-md bg-white/15' : 'border border-slate-100 shadow-xl'
+      style={containerStyle}
+      className={`hero-builder-container w-full relative overflow-hidden transition-all duration-500 rounded-[28px] p-6 sm:p-12 md:p-16 flex ${rowLayoutClass} ${finalVerticalAlignClass} justify-between gap-10 ${
+        layoutSettings ? '' : (isGlassCanvas ? 'backdrop-blur-md bg-white/15' : 'border border-slate-100 shadow-xl')
       }`}
     >
       {/* 1. RENDER VIDEO MODE */}
@@ -659,8 +820,11 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
       {/* 2. OVERLAYS */}
       {bgSettings.overlayEnabled !== false && (
         <div 
-          className="absolute inset-0 z-1 pointer-events-none select-none bg-slate-950" 
-          style={{ opacity: (bgSettings.overlayOpacity ?? 40) / 100 }}
+          className="absolute inset-0 z-1 pointer-events-none select-none" 
+          style={{ 
+            backgroundColor: overlayBgColor,
+            opacity: overlayOpacity 
+          }}
         />
       )}
 
@@ -669,9 +833,12 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
 
       {/* 3. DYNAMIC CONTENT AREA (Mode 2, Mode 3, or if elements explicitly enabled in Mode 1) */}
       {!isExactMode && (
-        <div 
-          style={{ maxWidth: textSettings.maxContentWidth ? `${textSettings.maxContentWidth}px` : undefined }}
-          className={`w-full md:w-3/5 flex flex-col justify-center relative z-10 space-y-5 md:space-y-6 ${contentAlignClass} ${contentWidthClass}`}
+        <motion.div 
+          variants={contentVariants}
+          initial="hidden"
+          animate="visible"
+          style={contentStyle}
+          className={`w-full md:w-3/5 flex flex-col justify-center relative z-10 ${finalContentAlignClass} ${layoutSettings ? '' : contentWidthClass}`}
         >
           {/* Tagline Badge */}
           {banner.badgeText && (banner.floatingBadge as any)?.show !== false && (
@@ -687,7 +854,10 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
           {/* Subheading */}
           {banner.subheading && (
             <p 
-              style={{ fontSize: textSettings.subheadingFontSize ? `${textSettings.subheadingFontSize}px` : undefined }}
+              style={{
+                fontSize: layoutSettings?.subtitleFontSize || (textSettings.subheadingFontSize ? `${textSettings.subheadingFontSize}px` : undefined),
+                color: layoutSettings?.textColor ? '#D4AF37' : undefined
+              }}
               className="text-[#D4AF37] font-semibold uppercase tracking-wider text-xs sm:text-sm"
             >
               {banner.subheading}
@@ -698,8 +868,8 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
           {banner.description && (
             <p 
               style={{ 
-                fontSize: textSettings.descriptionFontSize ? `${textSettings.descriptionFontSize}px` : undefined,
-                color: textSettings.descriptionColor || (bgSettings.overlayEnabled ? '#E2E8F0' : '#475569')
+                fontSize: layoutSettings?.descriptionFontSize || (textSettings.descriptionFontSize ? `${textSettings.descriptionFontSize}px` : undefined),
+                color: layoutSettings?.textColor ? '#e2e8f0' : (textSettings.descriptionColor || (bgSettings.overlayEnabled ? '#E2E8F0' : '#475569'))
               }}
               className="leading-relaxed max-w-lg font-light"
             >
@@ -772,7 +942,7 @@ function BannerFrame({ banner, onPrimaryClick, onSecondaryClick }: BannerFramePr
 
           {/* Action Buttons */}
           {renderCTAButtons()}
-        </div>
+        </motion.div>
       )}
 
       {/* RIGHT SIDE GRAPHIC AREA (For Mode 2 / Dynamic mode layout) */}

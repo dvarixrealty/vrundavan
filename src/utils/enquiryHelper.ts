@@ -85,7 +85,7 @@ export function routeEnquiryAutomatically(
 
   // 1. Search Dynamic Rules configured by Administrator
   const matchingRule = rules.find(
-    (r) => r.sourceCategory.toLowerCase() === (enquiry.sourceCategory || enquiry.sourceName || '').toLowerCase()
+    (r) => (r.sourceCategory || '').toLowerCase() === (enquiry.sourceCategory || enquiry.sourceName || '').toLowerCase()
   );
 
   if (matchingRule) {

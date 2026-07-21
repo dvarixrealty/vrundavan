@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { MapLocation, MapSettings } from '../types';
 import { firebaseService } from '../lib/firebaseService';
+import MediaPicker from './MediaPicker';
 
 interface SaaSLocationModuleProps {
   mapLocations: Record<string, MapLocation>;
@@ -691,13 +692,12 @@ export default function SaaSLocationModule({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="block text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Display Image URL</label>
-                  <input
-                    type="text"
+                  <MediaPicker
+                    label="Display Image"
                     value={formImage}
-                    onChange={(e) => setFormImage(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full bg-slate-5/50 border border-slate-200 text-slate-800 text-xs rounded-xl px-4 py-2 text-left"
+                    onChange={(url) => setFormImage(url)}
+                    folder="locations"
+                    category="Locations"
                   />
                 </div>
 
